@@ -1,4 +1,4 @@
-# Build artifacts
+# Build artifacts (generated during Docker build)
 dist/
 build/
 

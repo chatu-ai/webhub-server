@@ -9,9 +9,6 @@ interface Config {
   cors: {
     origin: string;
   };
-  websocket: {
-    port: number;
-  };
   logging: {
     level: string;
   };
@@ -23,9 +20,6 @@ const config: Config = {
   nodeEnv: process.env.NODE_ENV || 'development',
   cors: {
     origin: process.env.CORS_ORIGIN || '*',
-  },
-  websocket: {
-    port: parseInt(process.env.WS_PORT || '3001', 10),
   },
   logging: {
     level: process.env.LOG_LEVEL || 'info',
