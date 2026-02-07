@@ -13,10 +13,10 @@ export interface WebSocketServerOptions {
 
 export class WebSocketServerModule {
   private wss: WebSocketServer | null = null;
-  private options: WebHubServerOptions;
+  private options: WebSocketServerOptions;
   private wsManager: WebSocketManager;
 
-  constructor(options: WebHubServerOptions) {
+  constructor(options: WebSocketServerOptions) {
     this.options = options;
     const messageQueue = new MessageQueue();
     this.wsManager = new WebSocketManager(messageQueue);

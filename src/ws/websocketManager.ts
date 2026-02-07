@@ -1,6 +1,6 @@
 import WebSocket from 'ws';
 import { WebSocketFrame, HeartbeatPayload, ConnectionStatus } from '../types';
-import { MessageQueue } from './messageRouter';
+import { MessageQueue, MessageRouter } from '../router/messageRouter';
 
 export interface HeartbeatConfig {
   interval: number;
@@ -217,5 +217,5 @@ export interface WebSocketState {
   status: ConnectionStatus;
   lastHeartbeat: number;
   consecutiveFailures: number;
-  heartbeatTimer?: NodeJS.Timer;
+  heartbeatTimer?: ReturnType<typeof setInterval>;
 }

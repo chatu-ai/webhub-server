@@ -1,9 +1,15 @@
+import WebSocket from 'ws';
 import { InboundMessage, OutboundMessage, Channel } from '../types';
 
 export interface MessageRouter {
   routeInbound(message: InboundMessage): Promise<void>;
   routeOutbound(message: OutboundMessage, channel: Channel): Promise<void>;
   broadcast(channelId: string, message: InboundMessage): Promise<void>;
+  registerOutboundHandler(
+    handler: (message: OutboundMessage, channel: Channel) => Promise<void>
+  ): void;
+  registerConnection(channelId: string, ws: WebSocket): void;
+  unregisterConnection(channelId: string, ws: WebSocket): void;
 }
 
 export class WebSocketMessageRouter implements MessageRouter {

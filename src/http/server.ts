@@ -1,4 +1,5 @@
-import express, { Request, Response, NextFunction } from 'express';
+import express, { Application, Request, Response, NextFunction } from 'express';
+import http from 'http';
 import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
 import { ChannelStore } from '../store/channelStore';
@@ -22,9 +23,9 @@ export interface WebHubServerOptions {
 }
 
 export class WebHubServer {
-  private app: express.Application;
+  private app: Application;
   private options: WebHubServerOptions;
-  private server: ReturnType<typeof express> | null = null;
+  private server: http.Server | null = null;
 
   constructor(options: WebHubServerOptions) {
     this.options = options;
