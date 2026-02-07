@@ -73,14 +73,14 @@ export class WebHubServer {
   // ===== CHANNEL METHODS =====
   private async createChannel(req: Request, res: Response): Promise<void> {
     try {
-      const { name, serverUrl, description } = req.body;
+      const { name, webhubUrl, description } = req.body;
 
       const secret = `wh_secret_${uuidv4().replace(/-/g, '').substring(0, 16)}`;
       const accessToken = `wh_${uuidv4().replace(/-/g, '')}`;
 
       const channel = channelStore.create({
         name,
-        serverUrl,
+        webhubUrl,
         description,
         status: 'pending',
         secret,
@@ -116,7 +116,7 @@ export class WebHubServer {
       data: channels.map(ch => ({
         id: ch.id,
         name: ch.name,
-        serverUrl: ch.serverUrl,
+        webhubUrl: ch.webhubUrl,
         status: ch.status,
         createdAt: ch.createdAt,
       })),

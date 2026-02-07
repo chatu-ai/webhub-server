@@ -25,7 +25,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS channels (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
-    server_url TEXT NOT NULL,
+    webhub_url TEXT NOT NULL,
     description TEXT,
     status TEXT DEFAULT 'pending',
     secret TEXT NOT NULL UNIQUE,

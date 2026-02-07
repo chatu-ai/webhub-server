@@ -8,14 +8,14 @@ export class ChannelStore {
     const now = new Date().toISOString();
 
     const stmt = db.prepare(`
-      INSERT INTO channels (id, name, server_url, description, status, secret, access_token, config, metrics, created_at, updated_at)
+      INSERT INTO channels (id, name, webhub_url, description, status, secret, access_token, config, metrics, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
       id,
       data.name,
-      data.serverUrl,
+      data.webhubUrl,
       data.description || null,
       data.status,
       data.secret,
@@ -107,7 +107,7 @@ export class ChannelStore {
     return {
       id: row.id as string,
       name: row.name as string,
-      serverUrl: row.server_url as string,
+      webhubUrl: row.webhub_url as string,
       description: row.description as string | undefined,
       status: row.status as ChannelStatus,
       secret: row.secret as string,

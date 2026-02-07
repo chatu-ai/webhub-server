@@ -3,7 +3,7 @@
 export interface Channel {
   id: string;
   name: string;
-  serverUrl: string;
+  webhubUrl: string;  // WebHub Backend URL
   description?: string;
   status: ChannelStatus;
   secret: string;
