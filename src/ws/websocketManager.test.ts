@@ -1,5 +1,5 @@
-import { WebSocketManager, WebSocketState } from '../../ws/websocketManager';
-import { MessageQueue } from '../../router/messageRouter';
+import { WebSocketManager } from '../ws/websocketManager';
+import { MessageQueue } from '../router/messageRouter';
 import WebSocket from 'ws';
 
 describe('WebSocketManager', () => {

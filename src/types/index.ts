@@ -6,6 +6,7 @@ export interface Channel {
   serverUrl: string;
   secret: string;
   accessToken: string;
+  description?: string;
   createdAt: Date;
   updatedAt: Date;
   lastHeartbeat?: Date;

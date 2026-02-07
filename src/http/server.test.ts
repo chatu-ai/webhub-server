@@ -1,8 +1,8 @@
 import express from 'express';
 import request from 'supertest';
-import { WebHubServer } from '../../http/server';
-import { InMemoryChannelStore } from '../../store/channelStore';
-import { WebSocketMessageRouter } from '../../router/messageRouter';
+import { WebHubServer } from './server';
+import { InMemoryChannelStore } from '../store/channelStore';
+import { WebSocketMessageRouter } from '../router/messageRouter';
 
 describe('WebHubServer', () => {
   let server: WebHubServer;

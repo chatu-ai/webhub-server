@@ -1,5 +1,5 @@
-import { MessageQueue } from '../../router/messageRouter';
-import { OutboundMessage } from '../../types';
+import { MessageQueue } from '../router/messageRouter';
+import { OutboundMessage } from '../types';
 
 describe('MessageQueue', () => {
   let queue: MessageQueue;
