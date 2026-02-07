@@ -1,46 +1,7 @@
-// Multi-tenant types with tenant scoping
-
-export interface Tenant {
-  id: string;
-  name: string;
-  domain?: string;
-  plan: 'free' | 'pro' | 'enterprise';
-  maxChannels: number;
-  maxMessagesPerDay: number;
-  settings: Record<string, unknown>;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface User {
-  id: string;
-  tenantId: string;
-  username: string;
-  email?: string;
-  passwordHash?: string;
-  role: 'admin' | 'user' | 'readonly';
-  permissions: string[];
-  metadata: Record<string, unknown>;
-  lastLogin?: Date;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface ApiKey {
-  id: string;
-  tenantId: string;
-  name: string;
-  keyHash: string;
-  keyPrefix: string;
-  permissions: string[];
-  lastUsed?: Date;
-  expiresAt?: Date;
-  createdAt: Date;
-}
+// Channel-centric types (Channel = tenant unit)
 
 export interface Channel {
   id: string;
-  tenantId: string;
   name: string;
   serverUrl: string;
   description?: string;
@@ -70,7 +31,6 @@ export interface ChannelMetrics {
 
 export interface Message {
   id: string;
-  tenantId: string;
   channelId: string;
   direction: 'inbound' | 'outbound';
   messageType: 'text' | 'image' | 'audio' | 'video' | 'file' | 'system';
@@ -86,7 +46,6 @@ export interface Message {
 
 export interface MessageQueueItem {
   id: string;
-  tenantId: string;
   channelId: string;
   messageId: string;
   messageType: 'text' | 'image' | 'audio' | 'video' | 'file';
@@ -103,7 +62,6 @@ export interface MessageQueueItem {
 
 export interface WebSocketConnection {
   id: string;
-  tenantId: string;
   channelId: string;
   connectionId: string;
   remoteAddr?: string;
@@ -116,23 +74,13 @@ export interface WebSocketConnection {
 
 export interface AuditLog {
   id: string;
-  tenantId: string;
-  userId?: string;
+  channelId?: string;
   action: string;
   resourceType?: string;
   resourceId?: string;
   details: Record<string, unknown>;
   ipAddress?: string;
   createdAt: Date;
-}
-
-// Request context with tenant info
-export interface RequestContext {
-  tenantId: string;
-  userId?: string;
-  apiKeyId?: string;
-  ipAddress?: string;
-  userAgent?: string;
 }
 
 // API Response types

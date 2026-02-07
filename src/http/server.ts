@@ -2,9 +2,8 @@ import express, { Application, Request, Response, NextFunction } from 'express';
 import http from 'http';
 import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
-import { tenantStore, channelStore, messageStore, queueStore } from '../db/index.js';
+import { channelStore, messageStore, queueStore } from '../db/index.js';
 import { Logger } from 'pino';
-import { RequestContext, ApiResponse } from '../db/types.js';
 
 export interface WebHubServerOptions {
   port: number;
@@ -26,12 +25,6 @@ export class WebHubServer {
   private setupMiddleware(): void {
     this.app.use(cors());
     this.app.use(express.json());
-    
-    // Request ID middleware
-    this.app.use((req, res, next) => {
-      req.headers['x-request-id'] = req.headers['x-request-id'] || uuidv4();
-      next();
-    });
   }
 
   private setupRoutes(): void {
@@ -40,29 +33,25 @@ export class WebHubServer {
       res.json({ status: 'ok', timestamp: new Date().toISOString() });
     });
 
-    // ===== TENANT MANAGEMENT =====
-    this.app.post('/api/admin/tenants', this.createTenant.bind(this));
-    this.app.get('/api/admin/tenants', this.listTenants.bind(this));
-    this.app.get('/api/admin/tenants/:id', this.getTenant.bind(this));
-    this.app.put('/api/admin/tenants/:id', this.updateTenant.bind(this));
-    this.app.delete('/api/admin/tenants/:id', this.deleteTenant.bind(this));
-
     // ===== CHANNEL MANAGEMENT =====
-    this.app.post('/api/webhub/tenants/:tenantId/channels', this.createChannel.bind(this));
-    this.app.get('/api/webhub/tenants/:tenantId/channels', this.listChannels.bind(this));
-    this.app.get('/api/webhub/tenants/:tenantId/channels/:id', this.getChannel.bind(this));
-    this.app.get('/api/webhub/tenants/:tenantId/channels/:id/status', this.getChannelStatus.bind(this));
-    this.app.delete('/api/webhub/tenants/:tenantId/channels/:id', this.deleteChannel.bind(this));
+    this.app.post('/api/webhub/channels', this.createChannel.bind(this));
+    this.app.get('/api/webhub/channels', this.listChannels.bind(this));
+    this.app.get('/api/webhub/channels/:id', this.getChannel.bind(this));
+    this.app.get('/api/webhub/channels/:id/status', this.getChannelStatus.bind(this));
+    this.app.delete('/api/webhub/channels/:id', this.deleteChannel.bind(this));
 
     // ===== MESSAGE ROUTES =====
-    this.app.post('/api/webhub/tenants/:tenantId/channels/:id/messages', this.sendMessage.bind(this));
-    this.app.get('/api/webhub/tenants/:tenantId/channels/:id/messages', this.getMessages.bind(this));
-    this.app.post('/api/webhub/tenants/:tenantId/channels/:id/heartbeat', this.sendHeartbeat.bind(this));
+    this.app.post('/api/webhub/channels/:id/messages', this.sendMessage.bind(this));
+    this.app.get('/api/webhub/channels/:id/messages', this.getMessages.bind(this));
+    this.app.post('/api/webhub/channels/:id/heartbeat', this.sendHeartbeat.bind(this));
+
+    // ===== CHANNEL AUTH (from channel side) =====
+    this.app.post('/api/channel/register', this.registerChannel.bind(this));
+    this.app.post('/api/channel/connect', this.connectChannel.bind(this));
+    this.app.post('/api/channel/disconnect', this.disconnectChannel.bind(this));
 
     // ===== OPENCLAW INTEGRATION =====
     this.app.post('/api/channel/messages', this.forwardToOpenClaw.bind(this));
-    this.app.get('/api/channel/status', this.getOpenClawStatus.bind(this));
-    this.app.post('/api/channel/verify', this.verifyChannel.bind(this));
     this.app.post('/api/channel/webhook', this.handleWebhook.bind(this));
 
     // Error handler
@@ -81,94 +70,15 @@ export class WebHubServer {
     });
   }
 
-  // ===== TENANT METHODS =====
-  private async createTenant(req: Request, res: Response): Promise<void> {
-    try {
-      const { name, domain, plan, maxChannels, maxMessagesPerDay } = req.body;
-
-      const tenant = tenantStore.create({
-        name,
-        domain,
-        plan: plan || 'free',
-        maxChannels: maxChannels || 10,
-        maxMessagesPerDay: maxMessagesPerDay || 1000,
-        settings: {},
-      });
-
-      this.options.logger?.info({ event: 'tenant_created', tenantId: tenant.id, name });
-      res.json({ success: true, data: tenant });
-    } catch (error: unknown) {
-      const err = error instanceof Error ? error : new Error(String(error));
-      this.options.logger?.error({ event: 'tenant_create_error', error: err.message });
-      res.status(500).json({ success: false, error: err.message, code: 'CREATE_FAILED' });
-    }
-  }
-
-  private async listTenants(req: Request, res: Response): Promise<void> {
-    const limit = parseInt(req.query.limit as string) || 100;
-    const offset = parseInt(req.query.offset as string) || 0;
-    const tenants = tenantStore.list(limit, offset);
-    res.json({ success: true, data: tenants });
-  }
-
-  private async getTenant(req: Request, res: Response): Promise<void> {
-    const tenant = tenantStore.getById(req.params.id);
-    if (!tenant) {
-      res.status(404).json({ success: false, error: 'Tenant not found', code: 'NOT_FOUND' });
-      return;
-    }
-    res.json({ success: true, data: tenant });
-  }
-
-  private async updateTenant(req: Request, res: Response): Promise<void> {
-    try {
-      const { name, domain, plan, maxChannels, maxMessagesPerDay, settings } = req.body;
-      const tenant = tenantStore.update(req.params.id, {
-        name,
-        domain,
-        plan,
-        maxChannels,
-        maxMessagesPerDay,
-        settings,
-      });
-      res.json({ success: true, data: tenant });
-    } catch (error: unknown) {
-      const err = error instanceof Error ? error : new Error(String(error));
-      res.status(500).json({ success: false, error: err.message, code: 'UPDATE_FAILED' });
-    }
-  }
-
-  private async deleteTenant(req: Request, res: Response): Promise<void> {
-    const deleted = tenantStore.delete(req.params.id);
-    if (!deleted) {
-      res.status(404).json({ success: false, error: 'Tenant not found', code: 'NOT_FOUND' });
-      return;
-    }
-    res.json({ success: true });
-  }
-
   // ===== CHANNEL METHODS =====
   private async createChannel(req: Request, res: Response): Promise<void> {
     try {
-      const { tenantId } = req.params;
       const { name, serverUrl, description } = req.body;
-
-      // Check channel limit
-      const count = channelStore.count(tenantId);
-      const tenant = tenantStore.getById(tenantId);
-      if (tenant && count >= tenant.maxChannels) {
-        res.status(403).json({
-          success: false,
-          error: 'Channel limit reached',
-          code: 'QUOTA_EXCEEDED',
-        });
-        return;
-      }
 
       const secret = `wh_secret_${uuidv4().replace(/-/g, '').substring(0, 16)}`;
       const accessToken = `wh_${uuidv4().replace(/-/g, '')}`;
 
-      const channel = channelStore.create(tenantId, {
+      const channel = channelStore.create({
         name,
         serverUrl,
         description,
@@ -179,7 +89,7 @@ export class WebHubServer {
         metrics: { totalMessages: 0, messagesToday: 0, connections: 0 },
       });
 
-      this.options.logger?.info({ event: 'channel_created', tenantId, channelId: channel.id });
+      this.options.logger?.info({ event: 'channel_created', channelId: channel.id, name });
       res.json({
         success: true,
         data: {
@@ -198,15 +108,15 @@ export class WebHubServer {
   }
 
   private async listChannels(req: Request, res: Response): Promise<void> {
-    const { tenantId } = req.params;
     const limit = parseInt(req.query.limit as string) || 100;
     const offset = parseInt(req.query.offset as string) || 0;
-    const channels = channelStore.list(tenantId, limit, offset);
+    const channels = channelStore.list(limit, offset);
     res.json({
       success: true,
       data: channels.map(ch => ({
-        channelId: ch.id,
+        id: ch.id,
         name: ch.name,
+        serverUrl: ch.serverUrl,
         status: ch.status,
         createdAt: ch.createdAt,
       })),
@@ -214,8 +124,8 @@ export class WebHubServer {
   }
 
   private async getChannel(req: Request, res: Response): Promise<void> {
-    const { tenantId, id } = req.params;
-    const channel = channelStore.getById(tenantId, id);
+    const { id } = req.params;
+    const channel = channelStore.getById(id);
     if (!channel) {
       res.status(404).json({ success: false, error: 'Channel not found', code: 'NOT_FOUND' });
       return;
@@ -224,8 +134,8 @@ export class WebHubServer {
   }
 
   private async getChannelStatus(req: Request, res: Response): Promise<void> {
-    const { tenantId, id } = req.params;
-    const channel = channelStore.getById(tenantId, id);
+    const { id } = req.params;
+    const channel = channelStore.getById(id);
     if (!channel) {
       res.status(404).json({ success: false, error: 'Channel not found', code: 'NOT_FOUND' });
       return;
@@ -233,7 +143,8 @@ export class WebHubServer {
     res.json({
       success: true,
       data: {
-        channelId: channel.id,
+        id: channel.id,
+        name: channel.name,
         status: channel.status,
         lastHeartbeat: channel.lastHeartbeat,
         metrics: channel.metrics,
@@ -242,60 +153,47 @@ export class WebHubServer {
   }
 
   private async deleteChannel(req: Request, res: Response): Promise<void> {
-    const { tenantId, id } = req.params;
-    const deleted = channelStore.delete(tenantId, id);
+    const { id } = req.params;
+    const deleted = channelStore.delete(id);
     if (!deleted) {
       res.status(404).json({ success: false, error: 'Channel not found', code: 'NOT_FOUND' });
       return;
     }
     // Cleanup related data
-    messageStore.deleteByChannel(tenantId, id);
-    queueStore.deleteByChannel(tenantId, id);
+    messageStore.deleteByChannel(id);
+    queueStore.deleteByChannel(id);
     res.json({ success: true });
   }
 
   // ===== MESSAGE METHODS =====
   private async sendMessage(req: Request, res: Response): Promise<void> {
     try {
-      const { tenantId, id } = req.params;
+      const { id: channelId } = req.params;
       const { target, content, messageType, metadata } = req.body;
 
-      const channel = channelStore.getById(tenantId, id);
+      const channel = channelStore.getById(channelId);
       if (!channel || channel.status !== 'connected') {
         res.status(400).json({ success: false, error: 'Channel not connected', code: 'CHANNEL_OFFLINE' });
         return;
       }
 
-      // Create message in queue
-      const messageId = uuidv4();
-      const queued = queueStore.create(tenantId, {
-        channelId: id,
-        messageId,
-        messageType: messageType || 'text',
-        content,
-        priority: 0,
-        retryCount: 0,
-        maxRetries: 3,
-        status: 'pending',
-      });
-
       // Create message record
-      messageStore.create(tenantId, {
-        channelId: id,
+      messageStore.create({
+        channelId,
         direction: 'outbound',
         messageType: messageType || 'text',
         content,
         metadata: metadata || {},
         senderId: 'system',
-        targetId: target,
+        targetId: target?.id,
         status: 'pending',
       });
 
-      channelStore.incrementMetrics(tenantId, id);
+      channelStore.incrementMetrics(channelId);
 
       res.json({
         success: true,
-        data: { messageId, queuedAt: queued.createdAt },
+        data: { messageId: uuidv4(), deliveredAt: new Date().toISOString() },
       });
     } catch (error: unknown) {
       const err = error instanceof Error ? error : new Error(String(error));
@@ -304,61 +202,114 @@ export class WebHubServer {
   }
 
   private async getMessages(req: Request, res: Response): Promise<void> {
-    const { tenantId, id } = req.params;
+    const { id: channelId } = req.params;
     const limit = parseInt(req.query.limit as string) || 100;
     const offset = parseInt(req.query.offset as string) || 0;
-    const messages = messageStore.listByChannel(tenantId, id, limit, offset);
+    const messages = messageStore.listByChannel(channelId, limit, offset);
     res.json({ success: true, data: messages });
   }
 
   private async sendHeartbeat(req: Request, res: Response): Promise<void> {
-    const { tenantId, id } = req.params;
-    const channel = channelStore.getById(tenantId, id);
+    const { id: channelId } = req.params;
+    const channel = channelStore.getById(channelId);
     if (!channel) {
       res.status(404).json({ success: false, error: 'Channel not found', code: 'NOT_FOUND' });
       return;
     }
-    channelStore.updateLastHeartbeat(tenantId, id);
+    channelStore.updateLastHeartbeat(channelId);
     res.json({ success: true, data: { status: channel.status } });
+  }
+
+  // ===== CHANNEL AUTH (from channel side) =====
+  private async registerChannel(req: Request, res: Response): Promise<void> {
+    const { channelId, secret } = req.body;
+    const channel = channelStore.getBySecret(secret);
+    
+    if (!channel || channel.id !== channelId) {
+      res.status(401).json({ success: false, error: 'Invalid credentials', code: 'UNAUTHORIZED' });
+      return;
+    }
+
+    channelStore.updateStatus(channelId, 'registered');
+    this.options.logger?.info({ event: 'channel_registered', channelId });
+    
+    res.json({ 
+      success: true, 
+      data: { 
+        channelId: channel.id,
+        accessToken: channel.accessToken,
+      } 
+    });
+  }
+
+  private async connectChannel(req: Request, res: Response): Promise<void> {
+    const { channelId } = req.body;
+    const token = req.headers['x-access-token'] as string;
+    
+    const channel = channelStore.getByAccessToken(token);
+    if (!channel || channel.id !== channelId) {
+      res.status(401).json({ success: false, error: 'Invalid token', code: 'UNAUTHORIZED' });
+      return;
+    }
+
+    channelStore.updateStatus(channelId, 'connected');
+    this.options.logger?.info({ event: 'channel_connected', channelId });
+    
+    res.json({ success: true, data: { status: 'connected' } });
+  }
+
+  private async disconnectChannel(req: Request, res: Response): Promise<void> {
+    const { channelId } = req.body;
+    const token = req.headers['x-access-token'] as string;
+    
+    const channel = channelStore.getByAccessToken(token);
+    if (!channel || channel.id !== channelId) {
+      res.status(401).json({ success: false, error: 'Invalid token', code: 'UNAUTHORIZED' });
+      return;
+    }
+
+    channelStore.updateStatus(channelId, 'disconnected');
+    this.options.logger?.info({ event: 'channel_disconnected', channelId });
+    
+    res.json({ success: true, data: { status: 'disconnected' } });
   }
 
   // ===== OPENCLAW INTEGRATION =====
   private async forwardToOpenClaw(req: Request, res: Response): Promise<void> {
     const { channelId, messageId, target, content } = req.body;
     
-    // Get channel by access token from header
     const token = req.headers['x-channel-token'] as string;
     if (!token) {
       res.status(401).json({ success: false, error: 'Missing channel token', code: 'UNAUTHORIZED' });
       return;
     }
 
-    // In production, this would forward to OpenClaw
+    // Store outbound message
+    messageStore.create({
+      channelId,
+      direction: 'outbound',
+      messageType: 'text',
+      content,
+      metadata: { messageId },
+      senderId: 'system',
+      targetId: target?.id,
+      status: 'sent',
+    });
+
     res.json({ success: true, messageId, deliveredAt: new Date().toISOString() });
   }
 
-  private async getOpenClawStatus(req: Request, res: Response): Promise<void> {
-    res.json({ success: true, data: { status: 'connected', timestamp: new Date().toISOString() } });
-  }
-
-  private async verifyChannel(req: Request, res: Response): Promise<void> {
-    const { channelId, secret } = req.body;
-    // Implementation depends on token validation strategy
-    res.json({ success: true, data: { channelId, verified: true } });
-  }
-
   private async handleWebhook(req: Request, res: Response): Promise<void> {
-    const tenantId = req.headers['x-tenant-id'] as string;
     const channelId = req.headers['x-channel-id'] as string;
     const message = req.body;
 
-    if (!tenantId || !channelId) {
-      res.status(400).json({ success: false, error: 'Missing tenant or channel ID', code: 'INVALID_REQUEST' });
+    if (!channelId) {
+      res.status(400).json({ success: false, error: 'Missing channel ID', code: 'INVALID_REQUEST' });
       return;
     }
 
     // Store inbound message
-    messageStore.create(tenantId, {
+    messageStore.create({
       channelId,
       direction: 'inbound',
       messageType: 'text',

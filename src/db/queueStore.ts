@@ -3,24 +3,20 @@ import db from './schema.js';
 import { MessageQueueItem } from './types.js';
 
 export class QueueStore {
-  create(
-    tenantId: string,
-    data: Omit<MessageQueueItem, 'id' | 'tenantId' | 'createdAt'>
-  ): MessageQueueItem {
+  create(data: Omit<MessageQueueItem, 'id' | 'createdAt'>): MessageQueueItem {
     const id = uuidv4();
     const now = new Date().toISOString();
 
     const stmt = db.prepare(`
       INSERT INTO message_queue (
-        id, tenant_id, channel_id, message_id, message_type, content,
+        id, channel_id, message_id, message_type, content,
         priority, retry_count, max_retries, status, scheduled_at, created_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
       id,
-      tenantId,
       data.channelId,
       data.messageId,
       data.messageType,
@@ -33,31 +29,27 @@ export class QueueStore {
       now
     );
 
-    return this.getById(tenantId, id)!;
+    return this.getById(id)!;
   }
 
-  getById(tenantId: string, id: string): MessageQueueItem | null {
-    const stmt = db.prepare('SELECT * FROM message_queue WHERE tenant_id = ? AND id = ?');
-    const row = stmt.get(tenantId, id) as Record<string, unknown> | undefined;
-    return row ? this.mapRow(tenantId, row) : null;
+  getById(id: string): MessageQueueItem | null {
+    const stmt = db.prepare('SELECT * FROM message_queue WHERE id = ?');
+    const row = stmt.get(id) as Record<string, unknown> | undefined;
+    return row ? this.mapRow(row) : null;
   }
 
-  getByMessageId(tenantId: string, messageId: string): MessageQueueItem | null {
-    const stmt = db.prepare('SELECT * FROM message_queue WHERE tenant_id = ? AND message_id = ?');
-    const row = stmt.get(tenantId, messageId) as Record<string, unknown> | undefined;
-    return row ? this.mapRow(tenantId, row) : null;
+  getByMessageId(messageId: string): MessageQueueItem | null {
+    const stmt = db.prepare('SELECT * FROM message_queue WHERE message_id = ?');
+    const row = stmt.get(messageId) as Record<string, unknown> | undefined;
+    return row ? this.mapRow(row) : null;
   }
 
-  listPending(
-    tenantId: string,
-    channelId?: string,
-    limit = 100
-  ): MessageQueueItem[] {
+  listPending(channelId?: string, limit = 100): MessageQueueItem[] {
     let query = `
       SELECT * FROM message_queue
-      WHERE tenant_id = ? AND status = 'pending'
+      WHERE status = 'pending'
     `;
-    const params: unknown[] = [tenantId];
+    const params: unknown[] = [];
 
     if (channelId) {
       query += ' AND channel_id = ?';
@@ -69,15 +61,10 @@ export class QueueStore {
 
     const stmt = db.prepare(query);
     const rows = stmt.all(...params) as Record<string, unknown>[];
-    return rows.map(row => this.mapRow(tenantId, row));
+    return rows.map(row => this.mapRow(row));
   }
 
-  updateStatus(
-    tenantId: string,
-    id: string,
-    status: MessageQueueItem['status'],
-    error?: string
-  ): void {
+  updateStatus(id: string, status: MessageQueueItem['status'], error?: string): void {
     const updates: string[] = ['status = ?'];
     const values: unknown[] = [status];
 
@@ -91,36 +78,36 @@ export class QueueStore {
       values.push(error);
     }
 
-    values.push(tenantId, id);
+    values.push(id);
 
     const stmt = db.prepare(`
-      UPDATE message_queue SET ${updates.join(', ')} WHERE tenant_id = ? AND id = ?
+      UPDATE message_queue SET ${updates.join(', ')} WHERE id = ?
     `);
     stmt.run(...values);
   }
 
-  incrementRetry(tenantId: string, id: string): boolean {
-    const item = this.getById(tenantId, id);
+  incrementRetry(id: string): boolean {
+    const item = this.getById(id);
     if (!item) return false;
 
     const newRetryCount = item.retryCount + 1;
     const stmt = db.prepare(`
-      UPDATE message_queue SET retry_count = ? WHERE tenant_id = ? AND id = ?
+      UPDATE message_queue SET retry_count = ? WHERE id = ?
     `);
-    stmt.run(newRetryCount, tenantId, id);
+    stmt.run(newRetryCount, id);
 
     return newRetryCount < item.maxRetries;
   }
 
-  delete(tenantId: string, id: string): boolean {
-    const stmt = db.prepare('DELETE FROM message_queue WHERE tenant_id = ? AND id = ?');
-    const result = stmt.run(tenantId, id);
+  delete(id: string): boolean {
+    const stmt = db.prepare('DELETE FROM message_queue WHERE id = ?');
+    const result = stmt.run(id);
     return result.changes > 0;
   }
 
-  deleteByChannel(tenantId: string, channelId: string): number {
-    const stmt = db.prepare('DELETE FROM message_queue WHERE tenant_id = ? AND channel_id = ?');
-    const result = stmt.run(tenantId, channelId);
+  deleteByChannel(channelId: string): number {
+    const stmt = db.prepare('DELETE FROM message_queue WHERE channel_id = ?');
+    const result = stmt.run(channelId);
     return result.changes;
   }
 
@@ -134,12 +121,12 @@ export class QueueStore {
     return result.changes;
   }
 
-  countPending(tenantId: string, channelId?: string): number {
-    let query = 'SELECT COUNT(*) as count FROM message_queue WHERE tenant_id = ? AND status = ?';
-    const params: unknown[] = [tenantId, 'pending'];
+  countPending(channelId?: string): number {
+    let query = 'SELECT COUNT(*) as count FROM message_queue WHERE status = ?';
+    const params: unknown[] = ['pending'];
 
     if (channelId) {
-      query += ' AND channel_id = ?';
+      query += ' AND channelId = ?';
       params.push(channelId);
     }
 
@@ -148,10 +135,9 @@ export class QueueStore {
     return row.count;
   }
 
-  private mapRow(tenantId: string, row: Record<string, unknown>): MessageQueueItem {
+  private mapRow(row: Record<string, unknown>): MessageQueueItem {
     return {
       id: row.id as string,
-      tenantId,
       channelId: row.channel_id as string,
       messageId: row.message_id as string,
       messageType: row.message_type as MessageQueueItem['messageType'],

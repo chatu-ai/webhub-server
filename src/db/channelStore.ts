@@ -3,18 +3,17 @@ import db from './schema.js';
 import { Channel, ChannelStatus, ChannelMetrics } from './types.js';
 
 export class ChannelStore {
-  create(tenantId: string, data: Omit<Channel, 'id' | 'tenantId' | 'createdAt' | 'updatedAt'>): Channel {
+  create(data: Omit<Channel, 'id' | 'createdAt' | 'updatedAt'>): Channel {
     const id = uuidv4();
     const now = new Date().toISOString();
 
     const stmt = db.prepare(`
-      INSERT INTO channels (id, tenant_id, name, server_url, description, status, secret, access_token, config, metrics, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO channels (id, name, server_url, description, status, secret, access_token, config, metrics, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
       id,
-      tenantId,
       data.name,
       data.serverUrl,
       data.description || null,
@@ -27,50 +26,50 @@ export class ChannelStore {
       now
     );
 
-    return this.getById(tenantId, id)!;
+    return this.getById(id)!;
   }
 
-  getById(tenantId: string, id: string): Channel | null {
-    const stmt = db.prepare('SELECT * FROM channels WHERE tenant_id = ? AND id = ?');
-    const row = stmt.get(tenantId, id) as Record<string, unknown> | undefined;
-    return row ? this.mapRow(tenantId, row) : null;
+  getById(id: string): Channel | null {
+    const stmt = db.prepare('SELECT * FROM channels WHERE id = ?');
+    const row = stmt.get(id) as Record<string, unknown> | undefined;
+    return row ? this.mapRow(row) : null;
   }
 
-  getByName(tenantId: string, name: string): Channel | null {
-    const stmt = db.prepare('SELECT * FROM channels WHERE tenant_id = ? AND name = ?');
-    const row = stmt.get(tenantId, name) as Record<string, unknown> | undefined;
-    return row ? this.mapRow(tenantId, row) : null;
+  getByName(name: string): Channel | null {
+    const stmt = db.prepare('SELECT * FROM channels WHERE name = ?');
+    const row = stmt.get(name) as Record<string, unknown> | undefined;
+    return row ? this.mapRow(row) : null;
   }
 
-  getBySecret(tenantId: string, secret: string): Channel | null {
-    const stmt = db.prepare('SELECT * FROM channels WHERE tenant_id = ? AND secret = ?');
-    const row = stmt.get(tenantId, secret) as Record<string, unknown> | undefined;
-    return row ? this.mapRow(tenantId, row) : null;
+  getBySecret(secret: string): Channel | null {
+    const stmt = db.prepare('SELECT * FROM channels WHERE secret = ?');
+    const row = stmt.get(secret) as Record<string, unknown> | undefined;
+    return row ? this.mapRow(row) : null;
   }
 
-  getByAccessToken(tenantId: string, token: string): Channel | null {
-    const stmt = db.prepare('SELECT * FROM channels WHERE tenant_id = ? AND access_token = ?');
-    const row = stmt.get(tenantId, token) as Record<string, unknown> | undefined;
-    return row ? this.mapRow(tenantId, row) : null;
+  getByAccessToken(token: string): Channel | null {
+    const stmt = db.prepare('SELECT * FROM channels WHERE access_token = ?');
+    const row = stmt.get(token) as Record<string, unknown> | undefined;
+    return row ? this.mapRow(row) : null;
   }
 
-  updateStatus(tenantId: string, id: string, status: ChannelStatus): Channel | null {
+  updateStatus(id: string, status: ChannelStatus): Channel | null {
     const stmt = db.prepare(`
-      UPDATE channels SET status = ?, updated_at = ? WHERE tenant_id = ? AND id = ?
+      UPDATE channels SET status = ?, updated_at = ? WHERE id = ?
     `);
-    stmt.run(status, new Date().toISOString(), tenantId, id);
-    return this.getById(tenantId, id);
+    stmt.run(status, new Date().toISOString(), id);
+    return this.getById(id);
   }
 
-  updateLastHeartbeat(tenantId: string, id: string): void {
+  updateLastHeartbeat(id: string): void {
     const stmt = db.prepare(`
-      UPDATE channels SET last_heartbeat = ?, updated_at = ? WHERE tenant_id = ? AND id = ?
+      UPDATE channels SET last_heartbeat = ?, updated_at = ? WHERE id = ?
     `);
-    stmt.run(new Date().toISOString(), new Date().toISOString(), tenantId, id);
+    stmt.run(new Date().toISOString(), new Date().toISOString(), id);
   }
 
-  incrementMetrics(tenantId: string, id: string): void {
-    const channel = this.getById(tenantId, id);
+  incrementMetrics(id: string): void {
+    const channel = this.getById(id);
     if (!channel) return;
 
     const metrics: ChannelMetrics = {
@@ -81,33 +80,32 @@ export class ChannelStore {
     };
 
     const stmt = db.prepare(`
-      UPDATE channels SET metrics = ?, updated_at = ? WHERE tenant_id = ? AND id = ?
+      UPDATE channels SET metrics = ?, updated_at = ? WHERE id = ?
     `);
-    stmt.run(JSON.stringify(metrics), new Date().toISOString(), tenantId, id);
+    stmt.run(JSON.stringify(metrics), new Date().toISOString(), id);
   }
 
-  delete(tenantId: string, id: string): boolean {
-    const stmt = db.prepare('DELETE FROM channels WHERE tenant_id = ? AND id = ?');
-    const result = stmt.run(tenantId, id);
+  delete(id: string): boolean {
+    const stmt = db.prepare('DELETE FROM channels WHERE id = ?');
+    const result = stmt.run(id);
     return result.changes > 0;
   }
 
-  list(tenantId: string, limit = 100, offset = 0): Channel[] {
-    const stmt = db.prepare('SELECT * FROM channels WHERE tenant_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?');
-    const rows = stmt.all(tenantId, limit, offset) as Record<string, unknown>[];
-    return rows.map(row => this.mapRow(tenantId, row));
+  list(limit = 100, offset = 0): Channel[] {
+    const stmt = db.prepare('SELECT * FROM channels ORDER BY created_at DESC LIMIT ? OFFSET ?');
+    const rows = stmt.all(limit, offset) as Record<string, unknown>[];
+    return rows.map(row => this.mapRow(row));
   }
 
-  count(tenantId: string): number {
-    const stmt = db.prepare('SELECT COUNT(*) as count FROM channels WHERE tenant_id = ?');
-    const row = stmt.get(tenantId) as { count: number };
+  count(): number {
+    const stmt = db.prepare('SELECT COUNT(*) as count FROM channels');
+    const row = stmt.get() as { count: number };
     return row.count;
   }
 
-  private mapRow(tenantId: string, row: Record<string, unknown>): Channel {
+  private mapRow(row: Record<string, unknown>): Channel {
     return {
       id: row.id as string,
-      tenantId,
       name: row.name as string,
       serverUrl: row.server_url as string,
       description: row.description as string | undefined,
