@@ -37,7 +37,7 @@ WebHub Service is a **reference implementation** of a backend that:
 
 - **Channel Management**: Apply, list, delete channels
 - **Message Routing**: HTTP API and WebSocket support
-- **Real-time Updates**: WebSocket heartbeat and auto-reconnect
+- **SQLite Persistence**: Channels and messages stored in SQLite
 - **TypeScript**: Full type safety
 
 ## Quick Start
@@ -58,14 +58,18 @@ npm test
 
 ## API Endpoints
 
+All API endpoints are prefixed with `/api/webhub`:
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/channels` | List all channels |
-| POST | `/api/channels/apply` | Apply for a new channel |
-| GET | `/api/channels/:id` | Get channel details |
-| DELETE | `/api/channels/:id` | Delete a channel |
-| GET | `/api/channels/:id/messages` | Get message history |
-| POST | `/api/channels/:id/messages` | Send a message |
+| POST | `/api/webhub/channels` | Create channel |
+| GET | `/api/webhub/channels` | List all channels |
+| GET | `/api/webhub/channels/:id` | Get channel details |
+| GET | `/api/webhub/channels/:id/status` | Get channel status |
+| DELETE | `/api/webhub/channels/:id` | Delete channel |
+| POST | `/api/webhub/channels/:id/messages` | Send message |
+| GET | `/api/webhub/channels/:id/messages` | Get messages |
+| GET | `/health` | Health check |
 
 ## WebSocket
 
