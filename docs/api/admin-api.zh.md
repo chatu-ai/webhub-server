@@ -1,6 +1,6 @@
-# 频道 API 参考
+# 管理 API
 
-用于管理频道的 REST API 端点。
+用于前端和管理界面的管理接口。
 
 ## 基础 URL
 
@@ -130,6 +130,18 @@ http://localhost:3000/api/webhub
 }
 ```
 
+**响应：**
+
+```json
+{
+  "success": true,
+  "data": {
+    "messageId": "uuid",
+    "deliveredAt": "2026-02-07T18:30:00.000Z"
+  }
+}
+```
+
 ### 获取消息历史
 
 **GET** `/channels/:id/messages`
@@ -137,6 +149,17 @@ http://localhost:3000/api/webhub
 ### 心跳
 
 **POST** `/channels/:id/heartbeat`
+
+**响应：**
+
+```json
+{
+  "success": true,
+  "data": {
+    "status": "connected"
+  }
+}
+```
 
 ## 频道状态值
 

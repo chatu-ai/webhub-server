@@ -11,7 +11,8 @@ See the [docs](./docs/) directory for detailed documentation:
 - [Kubernetes Deployment](./docs/deployment/kubernetes.en.md)
 
 ### API Reference
-- [Channels API](./docs/api/channels.en.md)
+- [Admin API](./docs/api/admin-api.en.md) - Frontend/management interfaces (`/api/webhub/*`)
+- [Channel API](./docs/api/channel-api.en.md) - WebHub Channel SDK (`/api/channel/*`)
 
 [中文文档](./docs/README.zh.md)
 
@@ -63,7 +64,9 @@ npm test
 
 ## API Endpoints
 
-All API endpoints are prefixed with `/api/webhub`:
+### Admin API (`/api/webhub/*`)
+
+For frontend and management interfaces:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -74,17 +77,25 @@ All API endpoints are prefixed with `/api/webhub`:
 | DELETE | `/api/webhub/channels/:id` | Delete channel |
 | POST | `/api/webhub/channels/:id/messages` | Send message |
 | GET | `/api/webhub/channels/:id/messages` | Get messages |
-| GET | `/health` | Health check |
+| POST | `/api/webhub/channels/:id/heartbeat` | Update heartbeat |
 
-## WebSocket
+### Channel API (`/api/channel/*`)
 
-Connect to `/ws` for real-time messaging:
+For WebHub Channel SDK integration:
 
-```typescript
-const ws = new WebSocket('ws://localhost:3000/ws');
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/channel/register` | Register channel |
+| POST | `/api/channel/connect` | Connect channel |
+| POST | `/api/channel/disconnect` | Disconnect channel |
+| POST | `/api/channel/messages` | Forward message |
+| POST | `/api/channel/webhook` | Receive webhook |
 
-// Heartbeat (every 30s)
-ws.send(JSON.stringify({ type: 'ping' }));
+## Health Check
+
+```bash
+curl http://localhost:3000/health
+# Response: {"status":"ok","timestamp":"..."}
 ```
 
 ## Related Projects
