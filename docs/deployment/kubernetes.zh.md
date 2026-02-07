@@ -145,11 +145,32 @@ kind: Ingress
 metadata:
   name: webhub-ingress
   namespace: webhub
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "7200"
+    nginx.ingress.kubernetes.io/websocket-services: "webhub-backend"
+    nginx.ingress.kubernetes.io/use-regex: "true"
 spec:
+  ingressClassName: nginx
   rules:
     - host: webhub.example.com
       http:
         paths:
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service:
+                name: webhub-backend
+                port:
+                  number: 80
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: webhub-backend
+                port:
+                  number: 80
           - path: /
             pathType: Prefix
             backend:
@@ -158,3 +179,41 @@ spec:
                 port:
                   number: 80
 ```
+
+## WebSocket 配置
+
+WebSocket 连接需要配置超时和代理设置：
+
+| 配置项 | 值 | 说明 |
+|--------|-----|------|
+| `proxy-read-timeout` | 3600 | 读取超时 |
+| `proxy-send-timeout` | 3600 | 发送超时 |
+| `proxy-connect-timeout` | 7200 | 连接超时 |
+| `websocket-services` | webhub-backend | WebSocket 服务名 |
+
+## SDK 连接配置
+
+Channel SDK 连接 K8s 部署的 WebHub：
+
+```typescript
+// K8s 集群内部连接
+const channel = new Channel({
+  webhubUrl: 'http://webhub-backend.webhub.svc.cluster.local:3000',
+  channelId: 'wh_xxx',
+  accessToken: 'token_xxx',
+});
+
+// K8s 集群外部连接 (通过 Ingress)
+const channel = new Channel({
+  webhubUrl: 'https://webhub.example.com',
+  channelId: 'wh_xxx',
+  accessToken: 'token_xxx',
+});
+```
+
+### K8s Service DNS
+
+| 类型 | DNS 格式 |
+|------|----------|
+| 集群内部 | `http://<service>.<namespace>.svc.cluster.local:<port>` |
+| 集群外部 | `http://<ingress-host>` |

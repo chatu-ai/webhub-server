@@ -239,6 +239,79 @@ kubectl delete -f deployment/kubernetes/
 
 ---
 
+## WebSocket Configuration
+
+For WebSocket connections, add annotation and timeout settings:
+
+```yaml
+# ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: webhub
+  namespace: webhub
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "7200"
+    nginx.ingress.kubernetes.io/websocket-services: "webhub"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: webhub.example.com
+      http:
+        paths:
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service:
+                name: webhub
+                port:
+                  number: 3000
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: webhub
+                port:
+                  number: 3000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: webhub-web
+                port:
+                  number: 80
+```
+
+## SDK Connection Configuration
+
+```typescript
+// Inside K8s cluster
+const channel = new Channel({
+  webhubUrl: 'http://webhub-backend.webhub.svc.cluster.local:3000',
+  channelId: 'wh_xxx',
+  accessToken: 'token_xxx',
+});
+
+// Outside K8s cluster (via Ingress)
+const channel = new Channel({
+  webhubUrl: 'https://webhub.example.com',
+  channelId: 'wh_xxx',
+  accessToken: 'token_xxx',
+});
+```
+
+### K8s Service DNS
+
+| Type | DNS Format |
+|------|------------|
+| Internal | `http://<service>.<namespace>.svc.cluster.local:<port>` |
+| External | `http://<ingress-host>` |
+
+---
+
 # Kubernetes 部署
 
 本指南介绍如何将 WebHub 部署到 Kubernetes，包括 ConfigMap、PersistentVolumeClaim、Service 和可选的 HorizontalPodAutoscaler 清单。
