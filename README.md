@@ -4,11 +4,16 @@ Reference backend implementation for WebHub - a standalone web service that brid
 
 ## Documentation
 
-For detailed deployment and API documentation, see the [docs](./docs/) directory:
+See the [docs](./docs/) directory for detailed documentation:
 
-- [Deployment - Docker](./docs/deployment/docker.md)
-- [Deployment - Kubernetes](./docs/deployment/kubernetes.md)
-- [API Reference - Channels](./docs/api/channels.md)
+### Deployment
+- [Docker Deployment](./docs/deployment/docker.en.md)
+- [Kubernetes Deployment](./docs/deployment/kubernetes.en.md)
+
+### API Reference
+- [Channels API](./docs/api/channels.en.md)
+
+[中文文档](./docs/README.zh.md)
 
 ## What is WebHub Service?
 
