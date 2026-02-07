@@ -2,6 +2,14 @@
 
 Reference backend implementation for WebHub - a standalone web service that bridges websites with OpenClaw.
 
+## Documentation
+
+For detailed deployment and API documentation, see the [docs](./docs/) directory:
+
+- [Deployment - Docker](./docs/deployment/docker.md)
+- [Deployment - Kubernetes](./docs/deployment/kubernetes.md)
+- [API Reference - Channels](./docs/api/channels.md)
+
 ## What is WebHub Service?
 
 WebHub Service is a **reference implementation** of a backend that:
