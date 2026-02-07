@@ -4,11 +4,13 @@ import { ChannelStore } from '../store/channelStore';
 import { WebSocketManager, WebSocketState } from './websocketManager';
 import { MessageRouter, MessageQueue } from '../router/messageRouter';
 import { WebSocketFrame, ConnectionStatus } from '../types';
+import { Logger } from 'pino';
 
 export interface WebSocketServerOptions {
   port: number;
   channelStore: ChannelStore;
   messageRouter: MessageRouter;
+  logger?: Logger;
 }
 
 export class WebSocketServerModule {
@@ -19,7 +21,7 @@ export class WebSocketServerModule {
   constructor(options: WebSocketServerOptions) {
     this.options = options;
     const messageQueue = new MessageQueue();
-    this.wsManager = new WebSocketManager(messageQueue);
+    this.wsManager = new WebSocketManager(messageQueue, undefined, options.logger);
 
     // Register message router for outbound messages
     this.options.messageRouter.registerOutboundHandler(
@@ -39,7 +41,7 @@ export class WebSocketServerModule {
       this.wss = new WebSocketServer({ port: this.options.port });
 
       this.wss.on('listening', () => {
-        console.log(`WebSocket server listening on port ${this.options.port}`);
+        this.options.logger?.info({ event: 'listening', port: this.options.port, message: 'WebSocket server started' });
         resolve();
       });
 
@@ -48,7 +50,7 @@ export class WebSocketServerModule {
       });
 
       this.wss.on('error', (error) => {
-        console.error('WebSocket server error:', error);
+        this.options.logger?.error({ event: 'error', error: error.message });
       });
     });
   }
@@ -90,7 +92,7 @@ export class WebSocketServerModule {
         const frame = JSON.parse(data.toString()) as WebSocketFrame;
         await this.handleMessage(channelId, frame);
       } catch (error) {
-        console.error('Invalid message format:', error);
+        this.options.logger?.error('Invalid message format:', error);
         ws.close(4004, 'Invalid message format');
       }
     });
@@ -101,7 +103,7 @@ export class WebSocketServerModule {
     });
 
     ws.on('error', (error) => {
-      console.error(`WebSocket error for channel ${channelId}:`, error);
+      this.options.logger?.error(`WebSocket error for channel ${channelId}:`, error);
     });
   }
 
@@ -142,7 +144,7 @@ export class WebSocketServerModule {
     if (this.wss) {
       return new Promise((resolve) => {
         this.wss!.close(() => {
-          console.log('WebSocket server stopped');
+          this.options.logger?.info('WebSocket server stopped');
           resolve();
         });
       });

@@ -15,21 +15,33 @@ import {
   Channel,
   ChannelStatus,
 } from '../types';
+import { Logger } from 'pino';
+import { createRequestLogger } from '../utils/logger';
 
 export interface WebHubServerOptions {
   port: number;
   channelStore: ChannelStore;
   messageRouter: MessageRouter;
+  logger?: Logger;
 }
 
 export class WebHubServer {
   private app: Application;
   private options: WebHubServerOptions;
   private server: http.Server | null = null;
+  private requestLogger: ReturnType<typeof createRequestLogger>;
 
   constructor(options: WebHubServerOptions) {
     this.options = options;
     this.app = express();
+    this.requestLogger = createRequestLogger(
+      options.logger || {
+        info: () => {},
+        error: () => {},
+        warn: () => {},
+        debug: () => {},
+      } as unknown as Logger
+    );
 
     this.setupMiddleware();
     this.setupRoutes();
@@ -65,7 +77,7 @@ export class WebHubServer {
 
     // Error handler
     this.app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
-      console.error('Server error:', err);
+      this.options.logger?.error('Server error:', err);
       const errorResponse: ErrorResponse = {
         success: false,
         error: 'Internal server error',
@@ -115,7 +127,7 @@ export class WebHubServer {
 
       res.json(response);
     } catch (error) {
-      console.error('Failed to apply channel:', error);
+      this.options.logger?.error('Failed to apply channel:', error);
       const errorResponse: ErrorResponse = {
         success: false,
         error: 'Failed to create channel',
@@ -138,7 +150,7 @@ export class WebHubServer {
         })),
       });
     } catch (error) {
-      console.error('Failed to list channels:', error);
+      this.options.logger?.error('Failed to list channels:', error);
       res.status(500).json({
         success: false,
         error: 'Failed to list channels',
@@ -173,7 +185,7 @@ export class WebHubServer {
         },
       });
     } catch (error) {
-      console.error('Failed to get channel:', error);
+      this.options.logger?.error('Failed to get channel:', error);
       res.status(500).json({
         success: false,
         error: 'Failed to get channel',
@@ -210,7 +222,7 @@ export class WebHubServer {
 
       res.json(response);
     } catch (error) {
-      console.error('Failed to get channel status:', error);
+      this.options.logger?.error('Failed to get channel status:', error);
       res.status(500).json({
         success: false,
         error: 'Failed to get channel status',
@@ -235,7 +247,7 @@ export class WebHubServer {
 
       res.json({ success: true });
     } catch (error) {
-      console.error('Failed to delete channel:', error);
+      this.options.logger?.error('Failed to delete channel:', error);
       res.status(500).json({
         success: false,
         error: 'Failed to delete channel',
@@ -290,7 +302,7 @@ export class WebHubServer {
 
       res.json(response);
     } catch (error) {
-      console.error('Failed to send message:', error);
+      this.options.logger?.error('Failed to send message:', error);
       res.status(500).json({
         success: false,
         error: 'Failed to send message',
@@ -324,7 +336,7 @@ export class WebHubServer {
         },
       });
     } catch (error) {
-      console.error('Failed to send heartbeat:', error);
+      this.options.logger?.error('Failed to send heartbeat:', error);
       res.status(500).json({
         success: false,
         error: 'Failed to process heartbeat',
@@ -356,7 +368,7 @@ export class WebHubServer {
         deliveredAt: new Date().toISOString(),
       });
     } catch (error) {
-      console.error('Failed to forward message:', error);
+      this.options.logger?.error('Failed to forward message:', error);
       res.status(500).json({
         success: false,
         error: 'Failed to forward message',
@@ -375,7 +387,7 @@ export class WebHubServer {
         },
       });
     } catch (error) {
-      console.error('Failed to get OpenClaw status:', error);
+      this.options.logger?.error('Failed to get OpenClaw status:', error);
       res.status(500).json({
         success: false,
         error: 'Failed to get status',
@@ -407,7 +419,7 @@ export class WebHubServer {
         },
       });
     } catch (error) {
-      console.error('Failed to verify channel:', error);
+      this.options.logger?.error('Failed to verify channel:', error);
       res.status(500).json({
         success: false,
         error: 'Failed to verify channel',
@@ -425,7 +437,7 @@ export class WebHubServer {
 
       res.json({ success: true });
     } catch (error) {
-      console.error('Failed to handle webhook:', error);
+      this.options.logger?.error('Failed to handle webhook:', error);
       res.status(500).json({
         success: false,
         error: 'Failed to process webhook',
@@ -438,7 +450,7 @@ export class WebHubServer {
   async start(): Promise<void> {
     return new Promise((resolve) => {
       this.server = this.app.listen(this.options.port, () => {
-        console.log(`WebHub server listening on port ${this.options.port}`);
+        this.options.logger?.info(`WebHub server listening on port ${this.options.port}`);
         resolve();
       });
     });
@@ -448,7 +460,7 @@ export class WebHubServer {
     if (this.server) {
       return new Promise((resolve) => {
         this.server!.close(() => {
-          console.log('WebHub server stopped');
+          this.options.logger?.info('WebHub server stopped');
           resolve();
         });
       });

@@ -1,6 +1,7 @@
 import WebSocket from 'ws';
 import { WebSocketFrame, HeartbeatPayload, ConnectionStatus } from '../types';
 import { MessageQueue, MessageRouter } from '../router/messageRouter';
+import { Logger } from 'pino';
 
 export interface HeartbeatConfig {
   interval: number;
@@ -18,10 +19,12 @@ export class WebSocketManager {
   private connections: Map<string, WebSocketState> = new Map();
   private heartbeatConfig: HeartbeatConfig;
   private messageQueue: MessageQueue;
+  private logger?: Logger;
 
-  constructor(messageQueue: MessageQueue, config?: Partial<HeartbeatConfig>) {
+  constructor(messageQueue: MessageQueue, config?: Partial<HeartbeatConfig>, logger?: Logger) {
     this.heartbeatConfig = { ...DEFAULT_HEARTBEAT_CONFIG, ...config };
     this.messageQueue = messageQueue;
+    this.logger = logger;
   }
 
   addConnection(channelId: string, ws: WebSocket): void {
@@ -69,7 +72,7 @@ export class WebSocketManager {
         const frame = JSON.parse(data.toString()) as WebSocketFrame;
         this.handleFrame(channelId, frame);
       } catch (error) {
-        console.error('Invalid message format:', error);
+        this.logger?.error('Invalid message format:', error);
       }
     });
 
@@ -79,7 +82,7 @@ export class WebSocketManager {
     });
 
     ws.on('error', (error) => {
-      console.error(`WebSocket error for channel ${channelId}:`, error);
+      this.logger?.error(`WebSocket error for channel ${channelId}:`, error);
       state.status = 'error';
     });
   }
@@ -192,7 +195,7 @@ export class WebSocketManager {
     try {
       ws.send(JSON.stringify(frame));
     } catch (error) {
-      console.error('Failed to send open frame:', error);
+      this.logger?.error('Failed to send open frame:', error);
     }
   }
 
