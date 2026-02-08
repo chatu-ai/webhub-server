@@ -60,6 +60,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      actions: read
 
     steps:
       - name: Checkout code
@@ -81,8 +82,8 @@ jobs:
           # 获取最新的 v2026.* tag (从远程前端仓库)
           VERSION=""
           
-          # 方法1: 从 API 获取最新 release
-          VERSION=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+          # 方法1: 从 API 获取最新 release (使用 PAT 以访问前端仓库)
+          VERSION=$(curl -s -H "Authorization: Bearer ${{ secrets.FRONTEND_TOKEN }}" \
             https://api.github.com/repos/chatu-ai/chatu-web-hub-front/releases/latest | \
             grep -oP '"tag_name": "\K[^"]+' | head -1)
           
