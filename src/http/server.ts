@@ -91,19 +91,36 @@ export class WebHubServer {
 
       this.options.logger?.info({ event: 'channel_created', channelId: channel.id, name });
       
-      // 构建 OpenClaw 插件安装命令
-      const installCmd = `openclaw plugins install chatu-ai/chatu-web-hub-service`;
+      const webhubUrl = channel.webhubUrl || 'http://localhost:3000';
       
-      // 构建注册命令（需要先安装插件）
-      const registerCmd = `cd ~/.openclaw/workspace/chatu-web-hub-service && npm run register ${channel.id} ${secret} --api-url ${channel.webhubUrl || 'http://localhost:3000'}`;
+      // 构建完整的安装和注册脚本
+      const envSetupCmd = `# 设置 WebHub 环境变量（可选）
+export WEBHUB_CHANNEL_ID="${channel.id}"
+export WEBHUB_SECRET="${secret}"
+export WEBHUB_API_URL="${webhubUrl}"`;
+
+      const installCmd = `# 1. 安装插件
+openclaw plugins install chatu-ai/chatu-web-hub-service`;
+
+      const cloneAndSetupCmd = `# 2. 克隆并进入工作目录
+cd ~/.openclaw/workspace/chatu-web-hub-service`;
+
+      const registerCmd = `# 3. 注册 Channel
+npm run register ${channel.id} ${secret} --api-url ${webhubUrl}`;
+
+      // 单行版本用于复制
+      const singleLineInstall = `openclaw plugins install chatu-ai/chatu-web-hub-service && cd ~/.openclaw/workspace/chatu-web-hub-service && npm run register ${channel.id} ${secret} --api-url ${webhubUrl}`;
       
       res.json({
         success: true,
         data: {
           channelId: channel.id,
           channelName: channel.name,
+          envSetupCommand: envSetupCmd,
           installCommand: installCmd,
+          cloneCommand: cloneAndSetupCmd,
           registerCommand: registerCmd,
+          singleLineCommand: singleLineInstall,
           secret: channel.secret,
           createdAt: channel.createdAt,
         },
