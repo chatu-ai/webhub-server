@@ -52,6 +52,7 @@ USER nodejs
 # Environment variables
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV DB_PATH=/data/webhub.db
 
 EXPOSE 80
 
