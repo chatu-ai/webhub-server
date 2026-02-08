@@ -21,7 +21,7 @@ http://localhost:3000/api/webhub
 ```json
 {
   "name": "my-server",
-  "serverUrl": "https://example.com",
+  "webhubUrl": "https://example.com",
   "description": "可选描述"
 }
 ```
@@ -34,7 +34,9 @@ http://localhost:3000/api/webhub
   "data": {
     "channelId": "uuid",
     "channelName": "my-server",
-    "registerCommand": "/webhub register uuid secret",
+    "cloneCommand": "git clone https://github.com/chatu-ai/chatu-web-hub-service.git && cd chatu-web-hub-service\nopenclaw plugins install .",
+    "addChannelCommand": "openclaw channels add --channel chatu-webhub --token \"uuid:secret\" --api-url https://example.com",
+    "singleLineCommand": "git clone https://github.com/chatu-ai/chatu-web-hub-service.git && cd chatu-web-hub-service && openclaw plugins install . && openclaw channels add --channel chatu-webhub --token \"uuid:secret\" --api-url https://example.com",
     "secret": "wh_secret_xxx",
     "createdAt": "2026-02-07T18:00:00.000Z"
   }
@@ -63,7 +65,7 @@ http://localhost:3000/api/webhub
     {
       "id": "uuid",
       "name": "my-server",
-      "serverUrl": "https://example.com",
+      "webhubUrl": "https://example.com",
       "status": "connected",
       "createdAt": "2026-02-07T18:00:00.000Z"
     }

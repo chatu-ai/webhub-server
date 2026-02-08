@@ -1,34 +1,41 @@
 ---
 name: webhub-channel
-description: Register this server as a WebHub channel
-metadata: {"openclaw":{"requires":{"bins":["npm"]}}}
+description: Register this server as a WebHub channel for OpenClaw
+metadata: {"openclaw":{"requires":{"bins":["git","npm"]}}}
 ---
 
 ## About
 
-This skill allows registering the current server as a WebHub channel for messaging.
+This skill allows registering the current server as a WebHub channel for messaging with OpenClaw.
 
-## Setup
+## Installation
 
-Register with WebHub management interface:
+Install via OpenClaw plugin system:
 
 ```bash
-cd ~/.openclaw/workspace/chatu-web-hub-service
-npm run register <CHANNEL_ID> <SECRET> --api-url <WEBHUB_URL>
+git clone https://github.com/chatu-ai/chatu-web-hub-service.git
+cd chatu-web-hub-service
+openclaw plugins install .
 ```
 
-Or install as OpenClaw plugin:
+## Channel Registration
+
+After applying for a channel on the WebHub management interface, add it to OpenClaw:
 
 ```bash
-openclaw plugins install chatu-ai/chatu-web-hub-service
+openclaw channels add --channel chatu-webhub --token "<CHANNEL_ID>:<SECRET>" --api-url <WEBHUB_URL>
 ```
 
-## Register Command
+## Setup Commands
 
-After cloning the repository:
 ```bash
+# Clone and install
+git clone https://github.com/chatu-ai/chatu-web-hub-service.git
+cd chatu-web-hub-service
 npm install
-npm run register <channelId> <secret> --api-url http://your-webhub-server:3000
+
+# Run register command (if not using openclaw channels add)
+npm run register <channelId> <secret> --api-url <webhubUrl>
 ```
 
 ## Environment Variables
