@@ -79,18 +79,29 @@ jobs:
         id: frontend-version
         run: |
           # 获取最新的 v2026.* tag (从远程前端仓库)
-          VERSION=$(git ls-remote --tags https://github.com/chatu-ai/chatu-web-hub-front.git 2>/dev/null | grep -oE 'v2026\.[0-9]+\.[0-9]+\.[0-9]+' | sort -V | tail -1 | cut -d'/' -f3)
+          VERSION=""
+          
+          # 方法1: 从 API 获取最新 release
+          VERSION=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/repos/chatu-ai/chatu-web-hub-front/releases/latest | \
+            grep -oP '"tag_name": "\K[^"]+' | head -1)
+          
           if [ -z "$VERSION" ]; then
-            # 尝试从 API 获取最新 release
-            VERSION=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-              https://api.github.com/repos/chatu-ai/chatu-web-hub-front/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+            echo "No release found, will skip allinone build"
+            echo "version=none" >> $GITHUB_OUTPUT
+          else
+            echo "Frontend version: $VERSION"
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
           fi
-          [ -z "$VERSION" ] && VERSION="latest"
-          echo "Frontend version: $VERSION"
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Skip allinone if no frontend release
+        if: steps['frontend-version'].outputs.version == 'none'
+        run: |
+          echo "No frontend release found. Skipping allinone build."
+          echo "No frontend release to download" > frontend-dist/.skip-allinone
 
       - name: Download frontend from GitHub Release
-        if: steps['frontend-version'].outputs.version != 'latest'
+        if: steps['frontend-version'].outputs.version != 'none' && steps['frontend-version'].outputs.version != 'latest'
         run: |
           VERSION="${{ steps['frontend-version'].outputs.version }}"
           FILENAME="chatu-web-hub-front-${VERSION}.tar.gz"
@@ -104,6 +115,7 @@ jobs:
           ls -la "$FILENAME"
 
       - name: Prepare frontend files
+        if: steps['frontend-version'].outputs.version != 'none' && steps['frontend-version'].outputs.version != 'latest'
         run: |
           # 解压前端 tar.gz 到 frontend/dist
           FRONTEND_TAR=$(ls *.tar.gz 2>/dev/null | head -1)
@@ -113,7 +125,7 @@ jobs:
             echo "Frontend extracted to frontend/dist"
             ls -la frontend/dist/
           else
-            echo "Warning: No frontend tar.gz found, allinone build may fail"
+            echo "Warning: No frontend tar.gz found"
           fi
 
       - name: Extract metadata for Docker (allinone)
@@ -127,6 +139,7 @@ jobs:
             type=sha,prefix=
 
       - name: Build and push All-in-One Docker image
+        if: steps['frontend-version'].outputs.version != 'none' && steps['frontend-version'].outputs.version != 'latest'
         uses: docker/build-push-action@v5
         with:
           context: .
