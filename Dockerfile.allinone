@@ -36,7 +36,7 @@ COPY --from=backend-builder /app/package.json ./backend/package.json
 COPY chatu-web-hub-service/frontend/dist/ /usr/share/nginx/html
 
 # Copy nginx config
-COPY chatu-web-hub-front/nginx.conf /etc/nginx/conf.d/default.conf
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 # Change ownership
 RUN chown -R nodejs:nodejs /app

@@ -60,8 +60,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-      # 需要访问前端仓库的 Release
-      contents: read
 
     steps:
       - name: Checkout code
@@ -80,11 +78,12 @@ jobs:
       - name: Get latest frontend release version
         id: frontend-version
         run: |
-          # 获取最新的 v2026.* tag
-          VERSION=$(git ls-remote --tags origin | grep -oE 'v2026\.[0-9]+\.[0-9]+\.[0-9]+' | sort -V | tail -1 | cut -d'/' -f3)
+          # 获取最新的 v2026.* tag (从远程前端仓库)
+          VERSION=$(git ls-remote --tags https://github.com/chatu-ai/chatu-web-hub-front.git 2>/dev/null | grep -oE 'v2026\.[0-9]+\.[0-9]+\.[0-9]+' | sort -V | tail -1 | cut -d'/' -f3)
           if [ -z "$VERSION" ]; then
             # 尝试从 API 获取最新 release
-            VERSION=$(curl -s https://api.github.com/repos/chatu-ai/chatu-web-hub-front/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+            VERSION=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              https://api.github.com/repos/chatu-ai/chatu-web-hub-front/releases/latest | grep -oP '"tag_name": "\K[^"]+')
           fi
           [ -z "$VERSION" ] && VERSION="latest"
           echo "Frontend version: $VERSION"
@@ -96,8 +95,10 @@ jobs:
           VERSION="${{ steps['frontend-version'].outputs.version }}"
           FILENAME="chatu-web-hub-front-${VERSION}.tar.gz"
           echo "Downloading $FILENAME from GitHub Release..."
-          # 使用 GitHub API 下载 Release 资产
-          curl -L -o "$FILENAME" \
+          # 使用 GitHub Token 认证下载私有仓库的 Release 资产
+          curl -L -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/octet-stream" \
+            -o "$FILENAME" \
             "https://github.com/chatu-ai/chatu-web-hub-front/releases/download/${VERSION}/${FILENAME}"
           echo "Downloaded: $FILENAME"
           ls -la "$FILENAME"
