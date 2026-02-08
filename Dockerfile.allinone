@@ -41,8 +41,12 @@ RUN mkdir -p /tmp/nginx /var/run && chown -R nodejs:nodejs /tmp/nginx /var/run
 # Copy nginx config (full config with daemon off)
 COPY nginx.conf /etc/nginx/nginx.conf
 
+# Copy start script
+COPY start.sh /start.sh
+RUN chmod +x /start.sh
+
 # Change ownership
-RUN chown -R nodejs:nodejs /app /usr/share/nginx/html
+RUN chown -R nodejs:nodejs /app /usr/share/nginx/html /tmp/nginx /var/run /start.sh
 USER nodejs
 
 # Environment variables
@@ -55,5 +59,5 @@ EXPOSE 80
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
   CMD node -e "require('http').get('http://127.0.0.1:3000/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"
 
-# Start Nginx + Backend (run in foreground for docker)
-CMD sh -c "nginx && node backend/dist/index.js"
+# Start script
+CMD ["/start.sh"]
