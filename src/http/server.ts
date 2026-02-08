@@ -73,14 +73,14 @@ export class WebHubServer {
   // ===== CHANNEL METHODS =====
   private async createChannel(req: Request, res: Response): Promise<void> {
     try {
-      const { name, webhubUrl, description } = req.body;
+      const { name, webhubUrl: reqWebhubUrl, description } = req.body;
 
       const secret = `wh_secret_${uuidv4().replace(/-/g, '').substring(0, 16)}`;
       const accessToken = `wh_${uuidv4().replace(/-/g, '')}`;
 
       const channel = channelStore.create({
         name,
-        webhubUrl,
+        webhubUrl: reqWebhubUrl,
         description,
         status: 'pending',
         secret,
@@ -91,13 +91,13 @@ export class WebHubServer {
 
       this.options.logger?.info({ event: 'channel_created', channelId: channel.id, name });
       
-      const webhubUrl = channel.webhubUrl || 'http://localhost:3000';
+      const apiUrl = channel.webhubUrl || 'http://localhost:3000';
       
       // 构建完整的安装和注册脚本
       const envSetupCmd = `# 设置 WebHub 环境变量（可选）
 export WEBHUB_CHANNEL_ID="${channel.id}"
 export WEBHUB_SECRET="${secret}"
-export WEBHUB_API_URL="${webhubUrl}"`;
+export WEBHUB_API_URL="${apiUrl}"`;
 
       const installCmd = `# 1. 安装插件
 openclaw plugins install chatu-ai/chatu-web-hub-service`;
@@ -106,10 +106,10 @@ openclaw plugins install chatu-ai/chatu-web-hub-service`;
 cd ~/.openclaw/workspace/chatu-web-hub-service`;
 
       const registerCmd = `# 3. 注册 Channel
-npm run register ${channel.id} ${secret} --api-url ${webhubUrl}`;
+npm run register ${channel.id} ${secret} --api-url ${apiUrl}`;
 
       // 单行版本用于复制
-      const singleLineInstall = `openclaw plugins install chatu-ai/chatu-web-hub-service && cd ~/.openclaw/workspace/chatu-web-hub-service && npm run register ${channel.id} ${secret} --api-url ${webhubUrl}`;
+      const singleLineInstall = `openclaw plugins install chatu-ai/chatu-web-hub-service && cd ~/.openclaw/workspace/chatu-web-hub-service && npm run register ${channel.id} ${secret} --api-url ${apiUrl}`;
       
       res.json({
         success: true,
