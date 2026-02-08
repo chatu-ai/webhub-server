@@ -1,4 +1,4 @@
-import './db/schema.js'; // Initialize database
+import { initDatabase } from './db/schema.js';
 import { WebHubServer } from './http/server.js';
 import { createLogger, getLogger } from './utils/logger.js';
 
@@ -8,35 +8,41 @@ async function main(): Promise<void> {
   const logger = createLogger({ name: 'webhub' });
   logger.info({ event: 'startup', message: 'Starting WebHub Service...' });
 
-  // Initialize HTTP server
-  const httpServer = new WebHubServer({
-    port: HTTP_PORT,
-    logger,
-  });
+  try {
+    // Initialize database (async)
+    await initDatabase();
+    logger.info({ event: 'db_ready', message: 'Database initialized' });
 
-  await httpServer.start();
+    // Initialize HTTP server
+    const httpServer = new WebHubServer({
+      port: HTTP_PORT,
+      logger,
+    });
 
-  logger.info({
-    event: 'started',
-    httpPort: HTTP_PORT,
-    message: 'WebHub Service started',
-  });
+    await httpServer.start();
 
-  // Graceful shutdown
-  const shutdown = async (signal: string): Promise<void> => {
-    logger.info({ signal, event: 'shutdown', message: 'Shutting down gracefully...' });
+    logger.info({
+      event: 'started',
+      httpPort: HTTP_PORT,
+      message: 'WebHub Service started',
+    });
 
-    await httpServer.stop();
+    // Graceful shutdown
+    const shutdown = async (signal: string): Promise<void> => {
+      logger.info({ signal, event: 'shutdown', message: 'Shutting down gracefully...' });
 
-    logger.info({ event: 'stopped', message: 'WebHub Service stopped' });
-    process.exit(0);
-  };
+      await httpServer.stop();
 
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
+      logger.info({ event: 'stopped', message: 'WebHub Service stopped' });
+      process.exit(0);
+    };
+
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT', () => shutdown('SIGINT'));
+  } catch (error) {
+    logger.error({ error: (error as Error).message, event: 'startup_error' });
+    process.exit(1);
+  }
 }
 
-main().catch((error) => {
-  getLogger().error({ error: error.message, stack: error.stack, event: 'startup_error' });
-  process.exit(1);
-});
+main();

@@ -7,15 +7,10 @@ export class QueueStore {
     const id = uuidv4();
     const now = new Date().toISOString();
 
-    const stmt = db.prepare(`
-      INSERT INTO message_queue (
-        id, channel_id, message_id, message_type, content,
-        priority, retry_count, max_retries, status, scheduled_at, created_at
-      )
+    db.prepare(`
+      INSERT INTO message_queue (id, channel_id, message_id, message_type, content, priority, retry_count, max_retries, status, scheduled_at, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    stmt.run(
+    `).run(
       id,
       data.channelId,
       data.messageId,
@@ -33,57 +28,39 @@ export class QueueStore {
   }
 
   getById(id: string): MessageQueueItem | null {
-    const stmt = db.prepare('SELECT * FROM message_queue WHERE id = ?');
-    const row = stmt.get(id) as Record<string, unknown> | undefined;
+    const row = db.prepare('SELECT * FROM message_queue WHERE id = ?').get(id) as Record<string, unknown> | undefined;
     return row ? this.mapRow(row) : null;
   }
 
   getByMessageId(messageId: string): MessageQueueItem | null {
-    const stmt = db.prepare('SELECT * FROM message_queue WHERE message_id = ?');
-    const row = stmt.get(messageId) as Record<string, unknown> | undefined;
+    const row = db.prepare('SELECT * FROM message_queue WHERE message_id = ?').get(messageId) as Record<string, unknown> | undefined;
     return row ? this.mapRow(row) : null;
   }
 
   listPending(channelId?: string, limit = 100): MessageQueueItem[] {
-    let query = `
-      SELECT * FROM message_queue
-      WHERE status = 'pending'
-    `;
-    const params: unknown[] = [];
+    let sql = 'SELECT * FROM message_queue WHERE status = ?';
+    const params: (string | number)[] = ['pending'];
 
     if (channelId) {
-      query += ' AND channel_id = ?';
+      sql += ' AND channel_id = ?';
       params.push(channelId);
     }
 
-    query += ' ORDER BY priority DESC, created_at ASC LIMIT ?';
+    sql += ' ORDER BY priority DESC, created_at ASC LIMIT ?';
     params.push(limit);
 
-    const stmt = db.prepare(query);
-    const rows = stmt.all(...params) as Record<string, unknown>[];
+    const rows = db.prepare(sql).all(...params) as Record<string, unknown>[];
     return rows.map(row => this.mapRow(row));
   }
 
   updateStatus(id: string, status: MessageQueueItem['status'], error?: string): void {
-    const updates: string[] = ['status = ?'];
-    const values: unknown[] = [status];
-
     if (status === 'processing') {
-      updates.push('processed_at = ?');
-      values.push(new Date().toISOString());
+      db.prepare('UPDATE message_queue SET status = ?, processed_at = ? WHERE id = ?').run(status, new Date().toISOString(), id);
+    } else if (error) {
+      db.prepare('UPDATE message_queue SET status = ?, error = ? WHERE id = ?').run(status, error, id);
+    } else {
+      db.prepare('UPDATE message_queue SET status = ? WHERE id = ?').run(status, id);
     }
-
-    if (error) {
-      updates.push('error = ?');
-      values.push(error);
-    }
-
-    values.push(id);
-
-    const stmt = db.prepare(`
-      UPDATE message_queue SET ${updates.join(', ')} WHERE id = ?
-    `);
-    stmt.run(...values);
   }
 
   incrementRetry(id: string): boolean {
@@ -91,48 +68,17 @@ export class QueueStore {
     if (!item) return false;
 
     const newRetryCount = item.retryCount + 1;
-    const stmt = db.prepare(`
-      UPDATE message_queue SET retry_count = ? WHERE id = ?
-    `);
-    stmt.run(newRetryCount, id);
-
+    db.prepare('UPDATE message_queue SET retry_count = ? WHERE id = ?').run(newRetryCount, id);
     return newRetryCount < item.maxRetries;
   }
 
   delete(id: string): boolean {
-    const stmt = db.prepare('DELETE FROM message_queue WHERE id = ?');
-    const result = stmt.run(id);
-    return result.changes > 0;
+    db.prepare('DELETE FROM message_queue WHERE id = ?').run(id);
+    return true;
   }
 
-  deleteByChannel(channelId: string): number {
-    const stmt = db.prepare('DELETE FROM message_queue WHERE channel_id = ?');
-    const result = stmt.run(channelId);
-    return result.changes;
-  }
-
-  cleanupExpired(): number {
-    const stmt = db.prepare(`
-      DELETE FROM message_queue
-      WHERE status = 'pending'
-      AND created_at < datetime('now', '-1 day')
-    `);
-    const result = stmt.run();
-    return result.changes;
-  }
-
-  countPending(channelId?: string): number {
-    let query = 'SELECT COUNT(*) as count FROM message_queue WHERE status = ?';
-    const params: unknown[] = ['pending'];
-
-    if (channelId) {
-      query += ' AND channelId = ?';
-      params.push(channelId);
-    }
-
-    const stmt = db.prepare(query);
-    const row = stmt.get(...params) as { count: number };
-    return row.count;
+  deleteByChannel(channelId: string): void {
+    db.prepare('DELETE FROM message_queue WHERE channel_id = ?').run(channelId);
   }
 
   private mapRow(row: Record<string, unknown>): MessageQueueItem {

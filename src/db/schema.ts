@@ -1,108 +1,146 @@
-import DatabaseConstructor from 'better-sqlite3';
+import initSqlJs, { Database } from 'sql.js';
 import path from 'path';
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type DatabaseType = any;
-
-const dbPath = process.env.DB_PATH || path.join(process.cwd(), 'data/webhub.db');
-
-// Ensure data directory exists
 import fs from 'fs';
-const dataDir = path.dirname(dbPath);
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
+
+// Global database instance
+let db: Database | null = null;
+let dbPath: string;
+
+// Initialize synchronously
+async function initDatabase(): Promise<Database> {
+  if (db) return db;
+  
+  const SQL = await initSqlJs();
+  dbPath = process.env.DB_PATH || path.join(process.cwd(), 'data/webhub.db');
+  
+  // Ensure data directory exists
+  const dataDir = path.dirname(dbPath);
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
+  
+  // Load existing database or create new one
+  if (fs.existsSync(dbPath)) {
+    const fileBuffer = fs.readFileSync(dbPath);
+    db = new SQL.Database(fileBuffer);
+  } else {
+    db = new SQL.Database();
+  }
+
+  // Create tables
+  db.run(`
+    CREATE TABLE IF NOT EXISTS channels (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      webhub_url TEXT NOT NULL,
+      description TEXT,
+      status TEXT DEFAULT 'pending',
+      secret TEXT NOT NULL UNIQUE,
+      access_token TEXT NOT NULL UNIQUE,
+      config TEXT DEFAULT '{}',
+      metrics TEXT DEFAULT '{"totalMessages":0,"messagesToday":0,"connections":0}',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      last_heartbeat DATETIME
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS messages (
+      id TEXT PRIMARY KEY,
+      channel_id TEXT NOT NULL,
+      direction TEXT NOT NULL,
+      message_type TEXT DEFAULT 'text',
+      content TEXT NOT NULL,
+      metadata TEXT DEFAULT '{}',
+      sender_id TEXT,
+      sender_name TEXT,
+      target_id TEXT,
+      reply_to TEXT,
+      status TEXT DEFAULT 'pending',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS message_queue (
+      id TEXT PRIMARY KEY,
+      channel_id TEXT NOT NULL,
+      message_id TEXT NOT NULL,
+      message_type TEXT DEFAULT 'text',
+      content TEXT NOT NULL,
+      priority INTEGER DEFAULT 0,
+      retry_count INTEGER DEFAULT 0,
+      max_retries INTEGER DEFAULT 3,
+      status TEXT DEFAULT 'pending',
+      scheduled_at DATETIME,
+      processed_at DATETIME,
+      error TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE
+    )
+  `);
+
+  // Save database
+  const data = db.export();
+  const buffer = Buffer.from(data);
+  fs.writeFileSync(dbPath, buffer);
+  
+  return db;
 }
 
-// Initialize database
-const db: DatabaseType = new DatabaseConstructor(dbPath);
+// Helper functions
+function runDb(sql: string, params: (string | number | null)[] = []): void {
+  if (!db) throw new Error('Database not initialized');
+  db.run(sql, params);
+  const data = db.export();
+  const buffer = Buffer.from(data);
+  fs.writeFileSync(dbPath, buffer);
+}
 
-// Enable WAL mode for better concurrency
-db.pragma('journal_mode = WAL');
+function getDb(): Database {
+  if (!db) throw new Error('Database not initialized');
+  return db;
+}
 
-// Initialize schema
-db.exec(`
-  -- Channels table (each channel = a tenant unit)
-  CREATE TABLE IF NOT EXISTS channels (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE,
-    webhub_url TEXT NOT NULL,
-    description TEXT,
-    status TEXT DEFAULT 'pending',
-    secret TEXT NOT NULL UNIQUE,
-    access_token TEXT NOT NULL UNIQUE,
-    config TEXT DEFAULT '{}',
-    metrics TEXT DEFAULT '{"totalMessages":0,"messagesToday":0,"connections":0}',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    last_heartbeat DATETIME
-  );
+// Export for use
+export { initDatabase, runDb, getDb };
 
-  -- Messages table (channel-scoped)
-  CREATE TABLE IF NOT EXISTS messages (
-    id TEXT PRIMARY KEY,
-    channel_id TEXT NOT NULL,
-    direction TEXT NOT NULL,
-    message_type TEXT DEFAULT 'text',
-    content TEXT NOT NULL,
-    metadata TEXT DEFAULT '{}',
-    sender_id TEXT,
-    sender_name TEXT,
-    target_id TEXT,
-    reply_to TEXT,
-    status TEXT DEFAULT 'pending',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE
-  );
+// Export a wrapper that initializes on first use
+const _initPromise = initDatabase();
 
-  -- Message Queue table (channel-scoped)
-  CREATE TABLE IF NOT EXISTS message_queue (
-    id TEXT PRIMARY KEY,
-    channel_id TEXT NOT NULL,
-    message_id TEXT NOT NULL,
-    message_type TEXT DEFAULT 'text',
-    content TEXT NOT NULL,
-    priority INTEGER DEFAULT 0,
-    retry_count INTEGER DEFAULT 0,
-    max_retries INTEGER DEFAULT 3,
-    status TEXT DEFAULT 'pending',
-    scheduled_at DATETIME,
-    processed_at DATETIME,
-    error TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE
-  );
-
-  -- WebSocket Connections table (channel-scoped)
-  CREATE TABLE IF NOT EXISTS ws_connections (
-    id TEXT PRIMARY KEY,
-    channel_id TEXT NOT NULL,
-    connection_id TEXT NOT NULL,
-    remote_addr TEXT,
-    user_agent TEXT,
-    status TEXT DEFAULT 'connected',
-    connected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    disconnected_at DATETIME,
-    metadata TEXT DEFAULT '{}',
-    FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE
-  );
-
-  -- Audit Log table
-  CREATE TABLE IF NOT EXISTS audit_logs (
-    id TEXT PRIMARY KEY,
-    channel_id TEXT,
-    action TEXT NOT NULL,
-    resource_type TEXT,
-    resource_id TEXT,
-    details TEXT DEFAULT '{}',
-    ip_address TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-
-  -- Create indexes
-  CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id, created_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_queue_channel_status ON message_queue(channel_id, status);
-  CREATE INDEX IF NOT EXISTS idx_ws_connections_channel ON ws_connections(channel_id, status);
-  CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at DESC);
-`);
-
-export default db;
+export default {
+  prepare: (sql: string) => {
+    const database = getDb();
+    return {
+      run: (...params: (string | number | null)[]) => {
+        database.run(sql, params);
+        const data = database.export();
+        const buffer = Buffer.from(data);
+        fs.writeFileSync(dbPath, buffer);
+      },
+      get: (...params: (string | number | null)[]) => {
+        const stmt = database.prepare(sql);
+        stmt.bind(params);
+        if (stmt.step()) {
+          const result = stmt.getAsObject();
+          stmt.free();
+          return result;
+        }
+        stmt.free();
+        return undefined;
+      },
+      all: (...params: (string | number | null)[]) => {
+        const results: Record<string, unknown>[] = [];
+        const stmt = database.prepare(sql);
+        stmt.bind(params);
+        while (stmt.step()) {
+          results.push(stmt.getAsObject());
+        }
+        stmt.free();
+        return results;
+      }
+    };
+  }
+};

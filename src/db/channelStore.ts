@@ -7,12 +7,10 @@ export class ChannelStore {
     const id = uuidv4();
     const now = new Date().toISOString();
 
-    const stmt = db.prepare(`
+    db.prepare(`
       INSERT INTO channels (id, name, webhub_url, description, status, secret, access_token, config, metrics, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    stmt.run(
+    `).run(
       id,
       data.name,
       data.webhubUrl,
@@ -30,42 +28,32 @@ export class ChannelStore {
   }
 
   getById(id: string): Channel | null {
-    const stmt = db.prepare('SELECT * FROM channels WHERE id = ?');
-    const row = stmt.get(id) as Record<string, unknown> | undefined;
+    const row = db.prepare('SELECT * FROM channels WHERE id = ?').get(id) as Record<string, unknown> | undefined;
     return row ? this.mapRow(row) : null;
   }
 
   getByName(name: string): Channel | null {
-    const stmt = db.prepare('SELECT * FROM channels WHERE name = ?');
-    const row = stmt.get(name) as Record<string, unknown> | undefined;
+    const row = db.prepare('SELECT * FROM channels WHERE name = ?').get(name) as Record<string, unknown> | undefined;
     return row ? this.mapRow(row) : null;
   }
 
   getBySecret(secret: string): Channel | null {
-    const stmt = db.prepare('SELECT * FROM channels WHERE secret = ?');
-    const row = stmt.get(secret) as Record<string, unknown> | undefined;
+    const row = db.prepare('SELECT * FROM channels WHERE secret = ?').get(secret) as Record<string, unknown> | undefined;
     return row ? this.mapRow(row) : null;
   }
 
   getByAccessToken(token: string): Channel | null {
-    const stmt = db.prepare('SELECT * FROM channels WHERE access_token = ?');
-    const row = stmt.get(token) as Record<string, unknown> | undefined;
+    const row = db.prepare('SELECT * FROM channels WHERE access_token = ?').get(token) as Record<string, unknown> | undefined;
     return row ? this.mapRow(row) : null;
   }
 
   updateStatus(id: string, status: ChannelStatus): Channel | null {
-    const stmt = db.prepare(`
-      UPDATE channels SET status = ?, updated_at = ? WHERE id = ?
-    `);
-    stmt.run(status, new Date().toISOString(), id);
+    db.prepare('UPDATE channels SET status = ?, updated_at = ? WHERE id = ?').run(status, new Date().toISOString(), id);
     return this.getById(id);
   }
 
   updateLastHeartbeat(id: string): void {
-    const stmt = db.prepare(`
-      UPDATE channels SET last_heartbeat = ?, updated_at = ? WHERE id = ?
-    `);
-    stmt.run(new Date().toISOString(), new Date().toISOString(), id);
+    db.prepare('UPDATE channels SET last_heartbeat = ?, updated_at = ? WHERE id = ?').run(new Date().toISOString(), new Date().toISOString(), id);
   }
 
   incrementMetrics(id: string): void {
@@ -79,28 +67,22 @@ export class ChannelStore {
       lastMessageAt: new Date(),
     };
 
-    const stmt = db.prepare(`
-      UPDATE channels SET metrics = ?, updated_at = ? WHERE id = ?
-    `);
-    stmt.run(JSON.stringify(metrics), new Date().toISOString(), id);
+    db.prepare('UPDATE channels SET metrics = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(metrics), new Date().toISOString(), id);
   }
 
   delete(id: string): boolean {
-    const stmt = db.prepare('DELETE FROM channels WHERE id = ?');
-    const result = stmt.run(id);
-    return result.changes > 0;
+    db.prepare('DELETE FROM channels WHERE id = ?').run(id);
+    return true;
   }
 
   list(limit = 100, offset = 0): Channel[] {
-    const stmt = db.prepare('SELECT * FROM channels ORDER BY created_at DESC LIMIT ? OFFSET ?');
-    const rows = stmt.all(limit, offset) as Record<string, unknown>[];
+    const rows = db.prepare('SELECT * FROM channels ORDER BY created_at DESC LIMIT ? OFFSET ?').all(limit, offset) as Record<string, unknown>[];
     return rows.map(row => this.mapRow(row));
   }
 
   count(): number {
-    const stmt = db.prepare('SELECT COUNT(*) as count FROM channels');
-    const row = stmt.get() as { count: number };
-    return row.count;
+    const row = db.prepare('SELECT COUNT(*) as count FROM channels').get() as { count: number };
+    return row?.count || 0;
   }
 
   private mapRow(row: Record<string, unknown>): Channel {

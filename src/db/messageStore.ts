@@ -7,12 +7,10 @@ export class MessageStore {
     const id = uuidv4();
     const now = new Date().toISOString();
 
-    const stmt = db.prepare(`
+    db.prepare(`
       INSERT INTO messages (id, channel_id, direction, message_type, content, metadata, sender_id, sender_name, target_id, reply_to, status, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    stmt.run(
+    `).run(
       id,
       data.channelId,
       data.direction,
@@ -31,66 +29,34 @@ export class MessageStore {
   }
 
   getById(id: string): Message | null {
-    const stmt = db.prepare('SELECT * FROM messages WHERE id = ?');
-    const row = stmt.get(id) as Record<string, unknown> | undefined;
+    const row = db.prepare('SELECT * FROM messages WHERE id = ?').get(id) as Record<string, unknown> | undefined;
     return row ? this.mapRow(row) : null;
   }
 
   listByChannel(channelId: string, limit = 100, offset = 0): Message[] {
-    const stmt = db.prepare(`
-      SELECT * FROM messages
-      WHERE channel_id = ?
-      ORDER BY created_at DESC
-      LIMIT ? OFFSET ?
-    `);
-    const rows = stmt.all(channelId, limit, offset) as Record<string, unknown>[];
+    const rows = db.prepare('SELECT * FROM messages WHERE channel_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?').all(channelId, limit, offset) as Record<string, unknown>[];
     return rows.map(row => this.mapRow(row));
   }
 
-  listByDateRange(
-    channelId: string,
-    startDate: Date,
-    endDate: Date,
-    limit = 1000
-  ): Message[] {
-    const stmt = db.prepare(`
-      SELECT * FROM messages
-      WHERE channel_id = ?
-      AND created_at BETWEEN ? AND ?
-      ORDER BY created_at DESC
-      LIMIT ?
-    `);
-    const rows = stmt.all(
-      channelId,
-      startDate.toISOString(),
-      endDate.toISOString(),
-      limit
-    ) as Record<string, unknown>[];
+  listByDateRange(channelId: string, startDate: Date, endDate: Date, limit = 1000): Message[] {
+    const rows = db.prepare('SELECT * FROM messages WHERE channel_id = ? AND created_at BETWEEN ? AND ? ORDER BY created_at DESC LIMIT ?').all(channelId, startDate.toISOString(), endDate.toISOString(), limit) as Record<string, unknown>[];
     return rows.map(row => this.mapRow(row));
   }
 
   countByChannelToday(channelId: string): number {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-
-    const stmt = db.prepare(`
-      SELECT COUNT(*) as count FROM messages
-      WHERE channel_id = ? AND created_at >= ?
-    `);
-    const row = stmt.get(channelId, today.toISOString()) as { count: number };
-    return row.count;
+    const row = db.prepare('SELECT COUNT(*) as count FROM messages WHERE channel_id = ? AND created_at >= ?').get(channelId, today.toISOString()) as { count: number };
+    return row?.count || 0;
   }
 
   delete(id: string): boolean {
-    const stmt = db.prepare('DELETE FROM messages WHERE id = ?');
-    const result = stmt.run(id);
-    return result.changes > 0;
+    db.prepare('DELETE FROM messages WHERE id = ?').run(id);
+    return true;
   }
 
-  deleteByChannel(channelId: string): number {
-    const stmt = db.prepare('DELETE FROM messages WHERE channel_id = ?');
-    const result = stmt.run(channelId);
-    return result.changes;
+  deleteByChannel(channelId: string): void {
+    db.prepare('DELETE FROM messages WHERE channel_id = ?').run(channelId);
   }
 
   private mapRow(row: Record<string, unknown>): Message {
