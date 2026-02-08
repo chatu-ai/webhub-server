@@ -1,0 +1,12 @@
+{
+  "id": "webhub-channel",
+  "name": "WebHub Channel",
+  "description": "Register and manage WebHub channels",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "openclaw": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  }
+}

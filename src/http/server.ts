@@ -91,14 +91,18 @@ export class WebHubServer {
 
       this.options.logger?.info({ event: 'channel_created', channelId: channel.id, name });
       
-      // 构建完整的 OpenClaw 命令
-      const registerCmd = `openclaw run --message "Register this channel with WebHub. Execute: cd ~/.openclaw/workspace/chatu-web-hub-service && npm run register ${channel.id} ${secret} --api-url ${channel.webhubUrl || 'http://localhost:3000'}" --timeout 120`;
+      // 构建 OpenClaw 插件安装命令
+      const installCmd = `openclaw plugins install chatu-ai/chatu-web-hub-service`;
+      
+      // 构建注册命令（需要先安装插件）
+      const registerCmd = `cd ~/.openclaw/workspace/chatu-web-hub-service && npm run register ${channel.id} ${secret} --api-url ${channel.webhubUrl || 'http://localhost:3000'}`;
       
       res.json({
         success: true,
         data: {
           channelId: channel.id,
           channelName: channel.name,
+          installCommand: installCmd,
           registerCommand: registerCmd,
           secret: channel.secret,
           createdAt: channel.createdAt,
