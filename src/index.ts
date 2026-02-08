@@ -1,55 +1,48 @@
-// Plugin entry point - loaded by OpenClaw via jiti
-// Type imports will be resolved at runtime by OpenClaw's SDK
+import { initDatabase } from './db/schema.js';
+import { WebHubServer } from './http/server.js';
+import { createLogger, getLogger } from './utils/logger.js';
 
-export default function registerWebHubPlugin(api: any) {
-  const pluginId = 'chatu-webhub'
+const HTTP_PORT = parseInt(process.env.HTTP_PORT || '3000', 10);
 
-  // Register channel plugin
-  api.registerChannel({
-    id: pluginId,
-    meta: {
-      id: pluginId,
-      label: 'Chatu-WebHub',
-      selectionLabel: 'Chatu-WebHub (Self-hosted)',
-      docsPath: 'https://github.com/chatu-ai/chatu-web-hub-service',
-      blurb: 'Self-hosted WebHub messaging channel for websites',
-      aliases: ['webhub', 'chatu'],
-    },
-    capabilities: {
-      chatTypes: ['direct', 'group'],
-      media: ['text', 'image', 'audio', 'video', 'file'],
-      features: ['mentions', 'threads', 'reactions'],
-    },
-    config: {
-      listAccountIds: (cfg: any) => Object.keys(cfg.channels?.chatuwebhub?.accounts ?? {}),
-      resolveAccount: (cfg: any, accountId: string) =>
-        cfg.channels?.chatuwebhub?.accounts?.[accountId ?? 'default'] ?? { accountId },
-    },
-    outbound: {
-      deliveryMode: 'direct',
-      sendText: async ({ text, target }: any) => {
-        return { ok: true, messageId: `wh_${Date.now()}` }
-      },
-    },
-  })
+async function main(): Promise<void> {
+  const logger = createLogger({ name: 'webhub' });
+  logger.info({ event: 'startup', message: 'Starting WebHub Service...' });
 
-  // Register CLI command for registration
-  api.registerCli(
-    ({ program }: any) => {
-      program
-        .command('chatu-webhub:register')
-        .description('Register a Chatu-WebHub channel')
-        .option('--channel-id <id>', 'Channel ID')
-        .option('--secret <secret>', 'Channel secret')
-        .option('--api-url <url>', 'WebHub API URL')
-        .action(async (options: any) => {
-          console.log('Use openclaw channels add command instead')
-          console.log('Example: openclaw channels add --channel chatu-webhub --token <channelId>:<secret> --api-url <url>')
-        })
-    },
-    { commands: ['chatu-webhub:register'] }
-  )
+  try {
+    // Initialize database (async)
+    await initDatabase();
+    logger.info({ event: 'db_ready', message: 'Database initialized' });
 
-  api.logger?.info({ event: 'plugin_loaded', pluginId }, 'Chatu-WebHub plugin loaded')
+    // Initialize HTTP server
+    const httpServer = new WebHubServer({
+      port: HTTP_PORT,
+      logger,
+    });
+
+    await httpServer.start();
+
+    logger.info({
+      event: 'started',
+      httpPort: HTTP_PORT,
+      message: 'WebHub Service started',
+    });
+
+    // Graceful shutdown
+    const shutdown = async (signal: string): Promise<void> => {
+      logger.info({ signal, event: 'shutdown', message: 'Shutting down gracefully...' });
+
+      await httpServer.stop();
+
+      logger.info({ event: 'stopped', message: 'WebHub Service stopped' });
+      process.exit(0);
+    };
+
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT', () => shutdown('SIGINT'));
+  } catch (error) {
+    logger.error({ error: (error as Error).message, event: 'startup_error' });
+    process.exit(1);
+  }
 }
 
+main();
