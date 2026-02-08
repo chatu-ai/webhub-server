@@ -1,7 +1,7 @@
 {
-  "id": "webhub-channel",
-  "name": "WebHub Channel",
-  "description": "Register and manage WebHub channels",
+  "id": "chatu-webhub",
+  "name": "Chatu-WebHub",
+  "description": "Self-hosted WebHub messaging channel for websites",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "openclaw": {

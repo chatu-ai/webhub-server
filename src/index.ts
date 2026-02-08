@@ -2,18 +2,18 @@
 // Type imports will be resolved at runtime by OpenClaw's SDK
 
 export default function registerWebHubPlugin(api: any) {
-  const pluginId = 'webhub-channel'
+  const pluginId = 'chatu-webhub'
 
   // Register channel plugin
   api.registerChannel({
     id: pluginId,
     meta: {
       id: pluginId,
-      label: 'WebHub',
-      selectionLabel: 'WebHub (Self-hosted)',
+      label: 'Chatu-WebHub',
+      selectionLabel: 'Chatu-WebHub (Self-hosted)',
       docsPath: 'https://github.com/chatu-ai/chatu-web-hub-service',
-      blurb: 'Self-hosted WebHub messaging channel',
-      aliases: ['webhub', 'wh'],
+      blurb: 'Self-hosted WebHub messaging channel for websites',
+      aliases: ['webhub', 'chatu'],
     },
     capabilities: {
       chatTypes: ['direct', 'group'],
@@ -21,9 +21,9 @@ export default function registerWebHubPlugin(api: any) {
       features: ['mentions', 'threads', 'reactions'],
     },
     config: {
-      listAccountIds: (cfg: any) => Object.keys(cfg.channels?.webhub?.accounts ?? {}),
+      listAccountIds: (cfg: any) => Object.keys(cfg.channels?.chatuwebhub?.accounts ?? {}),
       resolveAccount: (cfg: any, accountId: string) =>
-        cfg.channels?.webhub?.accounts?.[accountId ?? 'default'] ?? { accountId },
+        cfg.channels?.chatuwebhub?.accounts?.[accountId ?? 'default'] ?? { accountId },
     },
     outbound: {
       deliveryMode: 'direct',
@@ -37,19 +37,19 @@ export default function registerWebHubPlugin(api: any) {
   api.registerCli(
     ({ program }: any) => {
       program
-        .command('webhub:register')
-        .description('Register a WebHub channel')
+        .command('chatu-webhub:register')
+        .description('Register a Chatu-WebHub channel')
         .option('--channel-id <id>', 'Channel ID')
         .option('--secret <secret>', 'Channel secret')
         .option('--api-url <url>', 'WebHub API URL')
         .action(async (options: any) => {
-          console.log('Use npm run register command instead')
-          console.log('Example: npm run register <channelId> <secret> --api-url <url>')
+          console.log('Use openclaw channels add command instead')
+          console.log('Example: openclaw channels add --channel chatu-webhub --token <channelId>:<secret> --api-url <url>')
         })
     },
-    { commands: ['webhub:register'] }
+    { commands: ['chatu-webhub:register'] }
   )
 
-  api.logger?.info({ event: 'plugin_loaded', pluginId }, 'WebHub plugin loaded')
+  api.logger?.info({ event: 'plugin_loaded', pluginId }, 'Chatu-WebHub plugin loaded')
 }
 
