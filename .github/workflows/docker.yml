@@ -133,7 +133,7 @@ jobs:
         id: meta-allinone
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ github.repository }}-allinone
+          images: ${{ env.REGISTRY }}/${{ github.repository }}:allinone
           tags: |
             type=raw,value=allinone
             type=raw,value=latest
