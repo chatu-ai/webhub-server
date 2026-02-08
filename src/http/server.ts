@@ -93,24 +93,23 @@ export class WebHubServer {
       
       const apiUrl = channel.webhubUrl || 'http://localhost:3000';
       
-      // 构建安装脚本
-      const cloneAndInstallCmd = `# 1. 克隆插件仓库并安装
-git clone https://github.com/chatu-ai/chatu-web-hub-service.git && cd chatu-web-hub-service
-openclaw plugins install .`;
+      // 构建安装脚本（标准 OpenClaw 格式）
+      const installCmd = `# 安装插件
+openclaw plugins install ./`;
 
       // 添加 Channel 命令（符合 OpenClaw 标准格式）
-      const addChannelCmd = `# 2. 添加 Channel 到 OpenClaw
+      const addChannelCmd = `# 添加 Channel 到 OpenClaw
 openclaw channels add --channel chatu-webhub --token "${channel.id}:${secret}" --api-url ${apiUrl}`;
 
       // 单行版本
-      const singleLineInstall = `git clone https://github.com/chatu-ai/chatu-web-hub-service.git && cd chatu-web-hub-service && openclaw plugins install . && openclaw channels add --channel chatu-webhub --token "${channel.id}:${secret}" --api-url ${apiUrl}`;
+      const singleLineInstall = `openclaw plugins install ./ && openclaw channels add --channel chatu-webhub --token "${channel.id}:${secret}" --api-url ${apiUrl}`;
       
       res.json({
         success: true,
         data: {
           channelId: channel.id,
           channelName: channel.name,
-          cloneCommand: cloneAndInstallCmd,
+          installCommand: installCmd,
           addChannelCommand: addChannelCmd,
           singleLineCommand: singleLineInstall,
           secret: channel.secret,
