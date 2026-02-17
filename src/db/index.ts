@@ -1,5 +1,5 @@
-export { default as db } from './schema.js';
-export { channelStore } from './channelStore.js';
-export { messageStore } from './messageStore.js';
-export { queueStore } from './queueStore.js';
-export * from './types.js';
+export { default as db } from './schema';
+export { channelStore } from './channelStore';
+export { messageStore } from './messageStore';
+export { queueStore } from './queueStore';
+export * from './types';

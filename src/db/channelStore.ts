@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
-import db from './schema.js';
-import { Channel, ChannelStatus, ChannelMetrics } from './types.js';
+import db from './schema';
+import { Channel, ChannelStatus, ChannelMetrics } from './types';
 
 export class ChannelStore {
   create(data: Omit<Channel, 'id' | 'createdAt' | 'updatedAt'>): Channel {

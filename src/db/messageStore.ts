@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
-import db from './schema.js';
-import { Message } from './types.js';
+import db from './schema';
+import { Message } from './types';
 
 export class MessageStore {
   create(data: Omit<Message, 'id' | 'createdAt'>): Message {

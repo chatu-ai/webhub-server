@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
-import db from './schema.js';
-import { MessageQueueItem } from './types.js';
+import db from './schema';
+import { MessageQueueItem } from './types';
 
 export class QueueStore {
   create(data: Omit<MessageQueueItem, 'id' | 'createdAt'>): MessageQueueItem {

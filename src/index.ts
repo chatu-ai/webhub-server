@@ -1,6 +1,6 @@
-import { initDatabase } from './db/schema.js';
-import { WebHubServer } from './http/server.js';
-import { createLogger, getLogger } from './utils/logger.js';
+import { initDatabase } from './db/schema';
+import { WebHubServer } from './http/server';
+import { createLogger, getLogger } from './utils/logger';
 
 const HTTP_PORT = parseInt(process.env.HTTP_PORT || '3000', 10);
 

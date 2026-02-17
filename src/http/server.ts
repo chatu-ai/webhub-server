@@ -2,7 +2,7 @@ import express, { Application, Request, Response, NextFunction } from 'express';
 import http from 'http';
 import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
-import { channelStore, messageStore, queueStore } from '../db/index.js';
+import { channelStore, messageStore, queueStore } from '../db/index';
 import { Logger } from 'pino';
 
 export interface WebHubServerOptions {
