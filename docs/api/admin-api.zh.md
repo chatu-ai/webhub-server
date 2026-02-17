@@ -34,9 +34,9 @@ http://localhost:3000/api/webhub
   "data": {
     "channelId": "uuid",
     "channelName": "my-server",
-    "cloneCommand": "git clone https://github.com/chatu-ai/chatu-web-hub-service.git && cd chatu-web-hub-service\nopenclaw plugins install .",
-    "addChannelCommand": "openclaw channels add --channel chatu-webhub --token \"uuid:secret\" --api-url https://example.com",
-    "singleLineCommand": "git clone https://github.com/chatu-ai/chatu-web-hub-service.git && cd chatu-web-hub-service && openclaw plugins install . && openclaw channels add --channel chatu-webhub --token \"uuid:secret\" --api-url https://example.com",
+    "installCommand": "# 部署服务\ngit clone https://github.com/chatu-ai/chatu-web-hub-service.git && cd chatu-web-hub-service && npm install && npm run dev",
+    "addChannelCommand": "# 频道连接信息\nChannel ID: uuid\nSecret: wh_secret_xxx\nAPI URL: https://example.com",
+    "singleLineCommand": "git clone https://github.com/chatu-ai/chatu-web-hub-service.git && cd chatu-web-hub-service && npm install && npm run dev",
     "secret": "wh_secret_xxx",
     "createdAt": "2026-02-07T18:00:00.000Z"
   }

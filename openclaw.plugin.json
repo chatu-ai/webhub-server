@@ -1,6 +1,6 @@
 {
-  "id": "chatu-webhub",
-  "name": "Chatu-WebHub",
+  "id": "chatu",
+  "name": "Chatu",
   "description": "Self-hosted WebHub messaging channel for websites",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

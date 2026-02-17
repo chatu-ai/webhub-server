@@ -1,6 +1,6 @@
 # WebHub Backend Service
 
-Reference backend implementation for WebHub - a standalone web service that bridges websites with OpenClaw.
+A standalone web service that provides REST API and WebSocket support for website messaging channels.
 
 ## Documentation
 
@@ -18,32 +18,36 @@ See the [docs](./docs/) directory for detailed documentation:
 
 ## What is WebHub Service?
 
-WebHub Service is a **reference implementation** of a backend that:
+WebHub Service is a **backend server** that:
 - Provides REST API endpoints for channel management
 - Supports WebSocket connections for real-time messaging
-- Demonstrates how to integrate with OpenClaw Channel SDK
+- Manages channel authentication and message routing
+- Stores channel data and messages in SQLite database
 
 ## Architecture
 
 ```
 ┌─────────────┐     REST/WebSocket      ┌─────────────┐
-│  Frontend   │ ←────────────────────→ │  Backend    │
-│  (Manager)  │                        │  Service    │
-└─────────────┘                        └──────┬──────┘
+│  Frontend   │ ────────────────────→  │   WebHub    │
+│    Web      │                         │   Service   │
+│     UI      │ ←───────────────────   │  (Backend)  │
+└─────────────┘                         └──────┬──────┘
                                                │
-                                               │ Channel SDK
+                                               │ SQLite
                                                ▼
                                         ┌─────────────┐
-                                        │  OpenClaw   │
-                                        │  Gateway    │
+                                        │  Database   │
+                                        │  (Channels, │
+                                        │  Messages)  │
                                         └─────────────┘
 ```
 
 ## Features
 
-- **Channel Management**: Apply, list, delete channels
-- **Message Routing**: HTTP API and WebSocket support
-- **SQLite Persistence**: Channels and messages stored in SQLite
+- **Channel Management**: Create, list, query, delete channels via REST API
+- **Message Routing**: HTTP API and WebSocket support for real-time messaging
+- **SQLite Persistence**: Channels and messages stored in SQLite database
+- **Authentication**: Secret-based channel authentication
 - **TypeScript**: Full type safety
 
 ## Quick Start

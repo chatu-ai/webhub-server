@@ -93,26 +93,14 @@ export class WebHubServer {
       
       const apiUrl = channel.webhubUrl || 'http://localhost:3000';
       
-      // 构建安装脚本（标准 OpenClaw 格式）
-      const installCmd = `# 安装插件
-openclaw plugins install ./`;
-
-      // 添加 Channel 命令（符合 OpenClaw 标准格式）
-      const addChannelCmd = `# 添加 Channel 到 OpenClaw
-openclaw channels add --channel chatu-webhub --token "${channel.id}:${secret}" --api-url ${apiUrl}`;
-
-      // 单行版本
-      const singleLineInstall = `openclaw plugins install ./ && openclaw channels add --channel chatu-webhub --token "${channel.id}:${secret}" --api-url ${apiUrl}`;
-      
       res.json({
         success: true,
         data: {
           channelId: channel.id,
           channelName: channel.name,
-          installCommand: installCmd,
-          addChannelCommand: addChannelCmd,
-          singleLineCommand: singleLineInstall,
+          apiUrl: apiUrl,
           secret: channel.secret,
+          accessToken: channel.accessToken,
           createdAt: channel.createdAt,
         },
       });
@@ -292,49 +280,202 @@ openclaw channels add --channel chatu-webhub --token "${channel.id}:${secret}" -
 
   // ===== OPENCLAW INTEGRATION =====
   private async forwardToOpenClaw(req: Request, res: Response): Promise<void> {
-    const { channelId, messageId, target, content } = req.body;
-    
-    const token = req.headers['x-channel-token'] as string;
-    if (!token) {
-      res.status(401).json({ success: false, error: 'Missing channel token', code: 'UNAUTHORIZED' });
-      return;
+    try {
+      const { messageId, target, content, media, replyTo, timestamp } = req.body;
+      
+      // Get token from header
+      const token = req.headers['x-channel-token'] as string;
+      const channelId = req.headers['x-channel-id'] as string;
+      
+      if (!token) {
+        res.status(401).json({ success: false, error: 'Missing channel token', code: 'UNAUTHORIZED' });
+        return;
+      }
+      
+      if (!channelId) {
+        res.status(400).json({ success: false, error: 'Missing channel ID', code: 'INVALID_REQUEST' });
+        return;
+      }
+      
+      // Verify channel and token
+      const channel = channelStore.getById(channelId);
+      if (!channel) {
+        res.status(404).json({ success: false, error: 'Channel not found', code: 'NOT_FOUND' });
+        return;
+      }
+      
+      if (channel.accessToken !== token) {
+        res.status(401).json({ success: false, error: 'Invalid token', code: 'UNAUTHORIZED' });
+        return;
+      }
+      
+      // Determine message type
+      let messageType: 'text' | 'image' | 'audio' | 'video' | 'file' | 'system' = 'text';
+      if (media && Array.isArray(media) && media.length > 0) {
+        const mediaTypeValue = media[0].type;
+        // Validate and map media type
+        if (mediaTypeValue === 'image' || mediaTypeValue === 'audio' || 
+            mediaTypeValue === 'video' || mediaTypeValue === 'file') {
+          messageType = mediaTypeValue;
+        } else {
+          messageType = 'file'; // Default to file for unknown media types
+        }
+      }
+      
+      // Prepare message metadata
+      const metadata: any = {
+        messageId: messageId || `msg_${Date.now()}`,
+        timestamp: timestamp || Date.now(),
+      };
+      
+      if (replyTo) {
+        metadata.replyTo = replyTo;
+      }
+      
+      if (media && media.length > 0) {
+        metadata.media = media;
+      }
+      
+      if (content?.format) {
+        metadata.format = content.format;
+      }
+      
+      // Store outbound message
+      const storedMessage = messageStore.create({
+        channelId,
+        direction: 'outbound',
+        messageType,
+        content: JSON.stringify({
+          text: content?.text || '',
+          media,
+          target,
+        }),
+        metadata,
+        senderId: 'openclaw',
+        targetId: target?.id || 'default',
+        status: 'sent',
+      });
+      
+      // Update channel metrics
+      channelStore.incrementMetrics(channelId);
+      
+      this.options.logger?.info({ 
+        event: 'message_forwarded',
+        channelId,
+        messageId: metadata.messageId,
+        messageType,
+        targetId: target?.id 
+      });
+      
+      res.json({ 
+        success: true, 
+        messageId: metadata.messageId,
+        id: storedMessage.id,
+        deliveredAt: new Date().toISOString() 
+      });
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      this.options.logger?.error({ 
+        event: 'forward_message_error',
+        error: err.message,
+        stack: err.stack 
+      });
+      res.status(500).json({ 
+        success: false, 
+        error: err.message, 
+        code: 'FORWARD_FAILED' 
+      });
     }
-
-    // Store outbound message
-    messageStore.create({
-      channelId,
-      direction: 'outbound',
-      messageType: 'text',
-      content,
-      metadata: { messageId },
-      senderId: 'system',
-      targetId: target?.id,
-      status: 'sent',
-    });
-
-    res.json({ success: true, messageId, deliveredAt: new Date().toISOString() });
   }
 
   private async handleWebhook(req: Request, res: Response): Promise<void> {
-    const channelId = req.headers['x-channel-id'] as string;
-    const message = req.body;
+    try {
+      const channelId = req.headers['x-channel-id'] as string;
+      const token = req.headers['x-channel-token'] as string;
+      const message = req.body;
 
-    if (!channelId) {
-      res.status(400).json({ success: false, error: 'Missing channel ID', code: 'INVALID_REQUEST' });
-      return;
+      if (!channelId) {
+        res.status(400).json({ success: false, error: 'Missing channel ID', code: 'INVALID_REQUEST' });
+        return;
+      }
+      
+      // Verify channel and token
+      const channel = channelStore.getById(channelId);
+      if (!channel) {
+        res.status(404).json({ success: false, error: 'Channel not found', code: 'NOT_FOUND' });
+        return;
+      }
+      
+      if (token && channel.accessToken !== token) {
+        res.status(401).json({ success: false, error: 'Invalid token', code: 'UNAUTHORIZED' });
+        return;
+      }
+
+      // Extract message information
+      let messageType: 'text' | 'image' | 'audio' | 'video' | 'file' | 'system' = 'text';
+      if (message.media && message.media.length > 0) {
+        const mediaTypeValue = message.media[0].type;
+        // Validate and map media type
+        if (mediaTypeValue === 'image' || mediaTypeValue === 'audio' || 
+            mediaTypeValue === 'video' || mediaTypeValue === 'file') {
+          messageType = mediaTypeValue;
+        } else {
+          messageType = 'file'; // Default to file for unknown media types
+        }
+      }
+      
+      const senderId = message.sender?.id || message.from?.id || 'unknown';
+      const content = JSON.stringify({
+        text: message.content?.text || message.text || '',
+        sender: message.sender || message.from,
+        media: message.media,
+        replyTo: message.replyTo,
+      });
+
+      // Store inbound message
+      const storedMessage = messageStore.create({
+        channelId,
+        direction: 'inbound',
+        messageType,
+        content,
+        metadata: {
+          messageId: message.messageId || message.id,
+          timestamp: message.timestamp || Date.now(),
+          ...message.metadata,
+        },
+        senderId,
+        status: 'delivered',
+      });
+      
+      // Update channel metrics
+      channelStore.incrementMetrics(channelId);
+      
+      this.options.logger?.info({ 
+        event: 'webhook_received',
+        channelId,
+        messageId: message.messageId || message.id,
+        messageType,
+        senderId 
+      });
+
+      res.json({ 
+        success: true,
+        id: storedMessage.id,
+        receivedAt: new Date().toISOString() 
+      });
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      this.options.logger?.error({ 
+        event: 'webhook_error',
+        error: err.message,
+        stack: err.stack 
+      });
+      res.status(500).json({ 
+        success: false, 
+        error: err.message, 
+        code: 'WEBHOOK_FAILED' 
+      });
     }
-
-    // Store inbound message
-    messageStore.create({
-      channelId,
-      direction: 'inbound',
-      messageType: 'text',
-      content: JSON.stringify(message),
-      metadata: {},
-      status: 'delivered',
-    });
-
-    res.json({ success: true });
   }
 
   async start(): Promise<void> {

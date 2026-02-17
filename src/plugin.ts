@@ -44,7 +44,7 @@ export default function registerWebHubPlugin(api: any) {
         .option('--api-url <url>', 'WebHub API URL')
         .action(async (options: any) => {
           console.log('Use openclaw channels add command instead')
-          console.log('Example: openclaw channels add --channel chatu-webhub --token <channelId>:<secret> --api-url <url>')
+          console.log('Example: openclaw channels add --channel chatu --token <channelId>:<secret> --api-url <url>')
         })
     },
     { commands: ['chatu-webhub:register'] }
