@@ -1,6 +1,12 @@
 import WebSocket from 'ws';
 import { InboundMessage, OutboundMessage, Channel } from '../types';
 
+// Minimal WebSocket interface for testability
+export interface WebSocketLike {
+  readyState: number;
+  send(data: string): void;
+}
+
 export interface MessageRouter {
   routeInbound(message: InboundMessage): Promise<void>;
   routeOutbound(message: OutboundMessage, channel: Channel): Promise<void>;
@@ -8,12 +14,12 @@ export interface MessageRouter {
   registerOutboundHandler(
     handler: (message: OutboundMessage, channel: Channel) => Promise<void>
   ): void;
-  registerConnection(channelId: string, ws: WebSocket): void;
-  unregisterConnection(channelId: string, ws: WebSocket): void;
+  registerConnection(channelId: string, ws: WebSocketLike): void;
+  unregisterConnection(channelId: string, ws: WebSocketLike): void;
 }
 
 export class WebSocketMessageRouter implements MessageRouter {
-  private wsConnections: Map<string, Set<WebSocket>> = new Map();
+  private wsConnections: Map<string, Set<WebSocketLike>> = new Map();
   private outboundHandlers: Array<(message: OutboundMessage, channel: Channel) => Promise<void>> = [];
 
   constructor() {}
@@ -24,14 +30,14 @@ export class WebSocketMessageRouter implements MessageRouter {
     this.outboundHandlers.push(handler);
   }
 
-  registerConnection(channelId: string, ws: WebSocket): void {
+  registerConnection(channelId: string, ws: WebSocketLike): void {
     if (!this.wsConnections.has(channelId)) {
       this.wsConnections.set(channelId, new Set());
     }
     this.wsConnections.get(channelId)!.add(ws);
   }
 
-  unregisterConnection(channelId: string, ws: WebSocket): void {
+  unregisterConnection(channelId: string, ws: WebSocketLike): void {
     const connections = this.wsConnections.get(channelId);
     if (connections) {
       connections.delete(ws);
@@ -51,7 +57,7 @@ export class WebSocketMessageRouter implements MessageRouter {
         payload: message,
       };
 
-      const deadConnections: Set<WebSocket> = new Set();
+      const deadConnections: Set<WebSocketLike> = new Set();
 
       for (const ws of connections) {
         try {

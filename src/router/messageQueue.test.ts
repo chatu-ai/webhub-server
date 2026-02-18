@@ -5,7 +5,12 @@ describe('MessageQueue', () => {
   let queue: MessageQueue;
 
   beforeEach(() => {
+    jest.useFakeTimers();
     queue = new MessageQueue();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
   describe('add', () => {
@@ -53,6 +58,8 @@ describe('MessageQueue', () => {
       };
 
       queue.add(message);
+      // Advance time beyond the TIMEOUT (30000ms)
+      jest.advanceTimersByTime(31000);
       const expired = queue.getExpired();
 
       expect(expired).toContain('msg_123');

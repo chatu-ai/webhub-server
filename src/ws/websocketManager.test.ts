@@ -100,7 +100,7 @@ describe('WebSocketManager', () => {
 
   describe('getAllConnections', () => {
     it('should return all connections', () => {
-      const mockWs2 = { readyState: WebSocket.OPEN, send: jest.fn() } as unknown as jest.Mocked<WebSocket>;
+      const mockWs2 = { readyState: WebSocket.OPEN, send: jest.fn(), on: jest.fn(), close: jest.fn() } as unknown as jest.Mocked<WebSocket>;
 
       manager.addConnection('channel_1', mockWs);
       manager.addConnection('channel_2', mockWs2);

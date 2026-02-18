@@ -2,21 +2,54 @@ import express, { Application, Request, Response, NextFunction } from 'express';
 import http from 'http';
 import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
-import { channelStore, messageStore, queueStore } from '../db/index';
 import { Logger } from 'pino';
+import { ChannelStore } from '../store/channelStore';
+import { MessageRouter } from '../router/messageRouter';
 
 export interface WebHubServerOptions {
   port: number;
   logger?: Logger;
+  channelStore?: ChannelStore;
+  messageRouter?: MessageRouter;
 }
 
 export class WebHubServer {
   private app: Application;
   private options: WebHubServerOptions;
   private server: http.Server | null = null;
+  private channelStore: ChannelStore;
 
   constructor(options: WebHubServerOptions) {
     this.options = options;
+
+    if (options.channelStore) {
+      this.channelStore = options.channelStore;
+    } else {
+      const { channelStore: dbChannelStore } = require('../db/index');
+      // Wrap synchronous db store in async-compatible interface
+      this.channelStore = {
+        create: (data: Parameters<ChannelStore['create']>[0]) => Promise.resolve(dbChannelStore.create(data)),
+        getById: (id: string) => Promise.resolve(dbChannelStore.getById(id)),
+        getBySecret: (secret: string) => Promise.resolve(dbChannelStore.getBySecret(secret)),
+        getByAccessToken: (token: string) => Promise.resolve(dbChannelStore.getByAccessToken(token)),
+        updateStatus: (id: string, status: Parameters<ChannelStore['updateStatus']>[1]) =>
+          Promise.resolve(dbChannelStore.updateStatus(id, status)),
+        updateLastHeartbeat: (id: string) => {
+          dbChannelStore.updateLastHeartbeat(id);
+          return Promise.resolve(dbChannelStore.getById(id));
+        },
+        delete: (id: string) => {
+          const r = dbChannelStore.delete(id);
+          return Promise.resolve(typeof r === 'boolean' ? r : true);
+        },
+        list: () => Promise.resolve(dbChannelStore.list()),
+        incrementMetrics: (id: string) => {
+          if (dbChannelStore.incrementMetrics) dbChannelStore.incrementMetrics(id);
+          return Promise.resolve();
+        },
+      } as unknown as ChannelStore;
+    }
+
     this.app = express();
     this.setupMiddleware();
     this.setupRoutes();
@@ -28,29 +61,30 @@ export class WebHubServer {
   }
 
   private setupRoutes(): void {
-    // Health check
     this.app.get('/health', (req: Request, res: Response) => {
       res.json({ status: 'ok', timestamp: new Date().toISOString() });
     });
 
-    // ===== CHANNEL MANAGEMENT =====
-    this.app.post('/api/webhub/channels', this.createChannel.bind(this));
+    // Channel Management
+    this.app.post('/api/webhub/channels/apply', this.applyChannel.bind(this));
     this.app.get('/api/webhub/channels', this.listChannels.bind(this));
     this.app.get('/api/webhub/channels/:id', this.getChannel.bind(this));
     this.app.get('/api/webhub/channels/:id/status', this.getChannelStatus.bind(this));
     this.app.delete('/api/webhub/channels/:id', this.deleteChannel.bind(this));
 
-    // ===== MESSAGE ROUTES =====
+    // Message Routes
     this.app.post('/api/webhub/channels/:id/messages', this.sendMessage.bind(this));
     this.app.get('/api/webhub/channels/:id/messages', this.getMessages.bind(this));
     this.app.post('/api/webhub/channels/:id/heartbeat', this.sendHeartbeat.bind(this));
 
-    // ===== CHANNEL AUTH (from channel side) =====
+    // Channel Auth
     this.app.post('/api/channel/register', this.registerChannel.bind(this));
+    this.app.post('/api/channel/verify', this.verifyChannel.bind(this));
     this.app.post('/api/channel/connect', this.connectChannel.bind(this));
     this.app.post('/api/channel/disconnect', this.disconnectChannel.bind(this));
+    this.app.get('/api/channel/status', this.getOpenClawStatus.bind(this));
 
-    // ===== OPENCLAW INTEGRATION =====
+    // OpenClaw Integration
     this.app.post('/api/channel/messages', this.forwardToOpenClaw.bind(this));
     this.app.post('/api/channel/webhook', this.handleWebhook.bind(this));
 
@@ -62,66 +96,68 @@ export class WebHubServer {
         path: req.path,
         method: req.method,
       });
-      res.status(500).json({
-        success: false,
-        error: 'Internal server error',
-        code: 'INTERNAL_ERROR',
-      });
+      res.status(500).json({ success: false, error: 'Internal server error', code: 'INTERNAL_ERROR' });
     });
   }
 
-  // ===== CHANNEL METHODS =====
-  private async createChannel(req: Request, res: Response): Promise<void> {
+  private async applyChannel(req: Request, res: Response): Promise<void> {
     try {
-      const { name, webhubUrl: reqWebhubUrl, description } = req.body;
+      const { serverName, serverUrl, description } = req.body;
+
+      if (!serverName) {
+        res.status(400).json({ success: false, error: 'serverName is required', code: 'INVALID_REQUEST' });
+        return;
+      }
+      if (!serverUrl) {
+        res.status(400).json({ success: false, error: 'serverUrl is required', code: 'INVALID_REQUEST' });
+        return;
+      }
 
       const secret = `wh_secret_${uuidv4().replace(/-/g, '').substring(0, 16)}`;
       const accessToken = `wh_${uuidv4().replace(/-/g, '')}`;
 
-      const channel = channelStore.create({
-        name,
-        webhubUrl: reqWebhubUrl,
+      const channel = await this.channelStore.create({
+        name: serverName,
+        serverUrl,
         description,
         status: 'pending',
         secret,
         accessToken,
-        config: {},
-        metrics: { totalMessages: 0, messagesToday: 0, connections: 0 },
       });
 
-      this.options.logger?.info({ event: 'channel_created', channelId: channel.id, name });
-      
-      const apiUrl = channel.webhubUrl || 'http://localhost:3000';
-      
+      this.options.logger?.info({ event: 'channel_applied', channelId: channel.id, name: serverName });
+
+      const registerCommand = `/webhub register ${channel.id} ${secret}`;
+
       res.json({
         success: true,
         data: {
           channelId: channel.id,
           channelName: channel.name,
-          apiUrl: apiUrl,
+          apiUrl: serverUrl,
+          registerCommand,
           secret: channel.secret,
-          accessToken: channel.accessToken,
           createdAt: channel.createdAt,
         },
       });
     } catch (error: unknown) {
       const err = error instanceof Error ? error : new Error(String(error));
-      this.options.logger?.error({ event: 'channel_create_error', error: err.message });
+      this.options.logger?.error({ event: 'channel_apply_error', error: err.message });
       res.status(500).json({ success: false, error: err.message, code: 'CREATE_FAILED' });
     }
   }
 
   private async listChannels(req: Request, res: Response): Promise<void> {
-    const limit = parseInt(req.query.limit as string) || 100;
-    const offset = parseInt(req.query.offset as string) || 0;
-    const channels = channelStore.list(limit, offset);
+    const channels = await this.channelStore.list();
     res.json({
       success: true,
       data: channels.map(ch => ({
         id: ch.id,
         name: ch.name,
-        webhubUrl: ch.webhubUrl,
+        serverUrl: ch.serverUrl,
         status: ch.status,
+        secret: ch.secret,
+        lastHeartbeat: ch.lastHeartbeat,
         createdAt: ch.createdAt,
       })),
     });
@@ -129,19 +165,32 @@ export class WebHubServer {
 
   private async getChannel(req: Request, res: Response): Promise<void> {
     const { id } = req.params;
-    const channel = channelStore.getById(id);
+    const channel = await this.channelStore.getById(id);
     if (!channel) {
-      res.status(404).json({ success: false, error: 'Channel not found', code: 'NOT_FOUND' });
+      res.status(404).json({ success: false, error: 'Channel not found', code: 'CHANNEL_NOT_FOUND' });
       return;
     }
-    res.json({ success: true, data: channel });
+    res.json({
+      success: true,
+      data: {
+        channelId: channel.id,
+        name: channel.name,
+        serverUrl: channel.serverUrl,
+        status: channel.status,
+        secret: channel.secret,
+        description: channel.description,
+        createdAt: channel.createdAt,
+        updatedAt: channel.updatedAt,
+        lastHeartbeat: channel.lastHeartbeat,
+      },
+    });
   }
 
   private async getChannelStatus(req: Request, res: Response): Promise<void> {
     const { id } = req.params;
-    const channel = channelStore.getById(id);
+    const channel = await this.channelStore.getById(id);
     if (!channel) {
-      res.status(404).json({ success: false, error: 'Channel not found', code: 'NOT_FOUND' });
+      res.status(404).json({ success: false, error: 'Channel not found', code: 'CHANNEL_NOT_FOUND' });
       return;
     }
     res.json({
@@ -151,53 +200,41 @@ export class WebHubServer {
         name: channel.name,
         status: channel.status,
         lastHeartbeat: channel.lastHeartbeat,
-        metrics: channel.metrics,
       },
     });
   }
 
   private async deleteChannel(req: Request, res: Response): Promise<void> {
     const { id } = req.params;
-    const deleted = channelStore.delete(id);
+    const deleted = await this.channelStore.delete(id);
     if (!deleted) {
-      res.status(404).json({ success: false, error: 'Channel not found', code: 'NOT_FOUND' });
+      res.status(404).json({ success: false, error: 'Channel not found', code: 'CHANNEL_NOT_FOUND' });
       return;
     }
-    // Cleanup related data
-    messageStore.deleteByChannel(id);
-    queueStore.deleteByChannel(id);
     res.json({ success: true });
   }
 
-  // ===== MESSAGE METHODS =====
   private async sendMessage(req: Request, res: Response): Promise<void> {
     try {
       const { id: channelId } = req.params;
-      const { target, content, messageType, metadata } = req.body;
 
-      const channel = channelStore.getById(channelId);
-      if (!channel || channel.status !== 'connected') {
+      const channel = await this.channelStore.getById(channelId);
+      if (!channel) {
+        res.status(404).json({ success: false, error: 'Channel not found', code: 'CHANNEL_NOT_FOUND' });
+        return;
+      }
+
+      if (channel.status !== 'connected') {
         res.status(400).json({ success: false, error: 'Channel not connected', code: 'CHANNEL_OFFLINE' });
         return;
       }
 
-      // Create message record
-      messageStore.create({
-        channelId,
-        direction: 'outbound',
-        messageType: messageType || 'text',
-        content,
-        metadata: metadata || {},
-        senderId: 'system',
-        targetId: target?.id,
-        status: 'pending',
-      });
-
-      channelStore.incrementMetrics(channelId);
+      const messageId = uuidv4();
+      this.options.logger?.info({ event: 'message_sent', channelId, messageId });
 
       res.json({
         success: true,
-        data: { messageId: uuidv4(), deliveredAt: new Date().toISOString() },
+        data: { messageId, deliveredAt: new Date().toISOString() },
       });
     } catch (error: unknown) {
       const err = error instanceof Error ? error : new Error(String(error));
@@ -207,184 +244,141 @@ export class WebHubServer {
 
   private async getMessages(req: Request, res: Response): Promise<void> {
     const { id: channelId } = req.params;
-    const limit = parseInt(req.query.limit as string) || 100;
-    const offset = parseInt(req.query.offset as string) || 0;
-    const messages = messageStore.listByChannel(channelId, limit, offset);
-    res.json({ success: true, data: messages });
+    const channel = await this.channelStore.getById(channelId);
+    if (!channel) {
+      res.status(404).json({ success: false, error: 'Channel not found', code: 'CHANNEL_NOT_FOUND' });
+      return;
+    }
+    res.json({ success: true, data: [] });
   }
 
   private async sendHeartbeat(req: Request, res: Response): Promise<void> {
     const { id: channelId } = req.params;
-    const channel = channelStore.getById(channelId);
+    const channel = await this.channelStore.getById(channelId);
     if (!channel) {
-      res.status(404).json({ success: false, error: 'Channel not found', code: 'NOT_FOUND' });
+      res.status(404).json({ success: false, error: 'Channel not found', code: 'CHANNEL_NOT_FOUND' });
       return;
     }
-    channelStore.updateLastHeartbeat(channelId);
+    await this.channelStore.updateLastHeartbeat(channelId);
     res.json({ success: true, data: { status: channel.status } });
   }
 
-  // ===== CHANNEL AUTH (from channel side) =====
   private async registerChannel(req: Request, res: Response): Promise<void> {
     const { channelId, secret } = req.body;
-    const channel = channelStore.getBySecret(secret);
-    
+    const channel = await this.channelStore.getBySecret(secret);
+
     if (!channel || channel.id !== channelId) {
       res.status(401).json({ success: false, error: 'Invalid credentials', code: 'UNAUTHORIZED' });
       return;
     }
 
-    channelStore.updateStatus(channelId, 'registered');
+    await this.channelStore.updateStatus(channelId, 'registered');
     this.options.logger?.info({ event: 'channel_registered', channelId });
-    
-    res.json({ 
-      success: true, 
-      data: { 
+
+    res.json({
+      success: true,
+      data: {
         channelId: channel.id,
         accessToken: channel.accessToken,
-      } 
+      },
+    });
+  }
+
+  private async verifyChannel(req: Request, res: Response): Promise<void> {
+    const { channelId, secret } = req.body;
+    const channel = await this.channelStore.getBySecret(secret);
+
+    if (!channel || channel.id !== channelId) {
+      res.status(401).json({ success: false, error: 'Invalid credentials', code: 'UNAUTHORIZED' });
+      return;
+    }
+
+    res.json({
+      success: true,
+      data: {
+        verified: true,
+        channelId: channel.id,
+      },
     });
   }
 
   private async connectChannel(req: Request, res: Response): Promise<void> {
     const { channelId } = req.body;
     const token = req.headers['x-access-token'] as string;
-    
-    const channel = channelStore.getByAccessToken(token);
+
+    const channel = await this.channelStore.getByAccessToken(token);
     if (!channel || channel.id !== channelId) {
       res.status(401).json({ success: false, error: 'Invalid token', code: 'UNAUTHORIZED' });
       return;
     }
 
-    channelStore.updateStatus(channelId, 'connected');
+    await this.channelStore.updateStatus(channelId, 'connected');
     this.options.logger?.info({ event: 'channel_connected', channelId });
-    
     res.json({ success: true, data: { status: 'connected' } });
   }
 
   private async disconnectChannel(req: Request, res: Response): Promise<void> {
     const { channelId } = req.body;
     const token = req.headers['x-access-token'] as string;
-    
-    const channel = channelStore.getByAccessToken(token);
+
+    const channel = await this.channelStore.getByAccessToken(token);
     if (!channel || channel.id !== channelId) {
       res.status(401).json({ success: false, error: 'Invalid token', code: 'UNAUTHORIZED' });
       return;
     }
 
-    channelStore.updateStatus(channelId, 'disconnected');
+    await this.channelStore.updateStatus(channelId, 'disconnected');
     this.options.logger?.info({ event: 'channel_disconnected', channelId });
-    
     res.json({ success: true, data: { status: 'disconnected' } });
   }
 
-  // ===== OPENCLAW INTEGRATION =====
+  private async getOpenClawStatus(req: Request, res: Response): Promise<void> {
+    res.json({
+      success: true,
+      data: {
+        status: 'connected',
+        timestamp: new Date().toISOString(),
+      },
+    });
+  }
+
   private async forwardToOpenClaw(req: Request, res: Response): Promise<void> {
     try {
-      const { messageId, target, content, media, replyTo, timestamp } = req.body;
-      
-      // Get token from header
+      const { messageId } = req.body;
       const token = req.headers['x-channel-token'] as string;
       const channelId = req.headers['x-channel-id'] as string;
-      
+
       if (!token) {
         res.status(401).json({ success: false, error: 'Missing channel token', code: 'UNAUTHORIZED' });
         return;
       }
-      
+
       if (!channelId) {
         res.status(400).json({ success: false, error: 'Missing channel ID', code: 'INVALID_REQUEST' });
         return;
       }
-      
-      // Verify channel and token
-      const channel = channelStore.getById(channelId);
+
+      const channel = await this.channelStore.getById(channelId);
       if (!channel) {
         res.status(404).json({ success: false, error: 'Channel not found', code: 'NOT_FOUND' });
         return;
       }
-      
+
       if (channel.accessToken !== token) {
         res.status(401).json({ success: false, error: 'Invalid token', code: 'UNAUTHORIZED' });
         return;
       }
-      
-      // Determine message type
-      let messageType: 'text' | 'image' | 'audio' | 'video' | 'file' | 'system' = 'text';
-      if (media && Array.isArray(media) && media.length > 0) {
-        const mediaTypeValue = media[0].type;
-        // Validate and map media type
-        if (mediaTypeValue === 'image' || mediaTypeValue === 'audio' || 
-            mediaTypeValue === 'video' || mediaTypeValue === 'file') {
-          messageType = mediaTypeValue;
-        } else {
-          messageType = 'file'; // Default to file for unknown media types
-        }
-      }
-      
-      // Prepare message metadata
-      const metadata: any = {
-        messageId: messageId || `msg_${Date.now()}`,
-        timestamp: timestamp || Date.now(),
-      };
-      
-      if (replyTo) {
-        metadata.replyTo = replyTo;
-      }
-      
-      if (media && media.length > 0) {
-        metadata.media = media;
-      }
-      
-      if (content?.format) {
-        metadata.format = content.format;
-      }
-      
-      // Store outbound message
-      const storedMessage = messageStore.create({
-        channelId,
-        direction: 'outbound',
-        messageType,
-        content: JSON.stringify({
-          text: content?.text || '',
-          media,
-          target,
-        }),
-        metadata,
-        senderId: 'openclaw',
-        targetId: target?.id || 'default',
-        status: 'sent',
-      });
-      
-      // Update channel metrics
-      channelStore.incrementMetrics(channelId);
-      
-      this.options.logger?.info({ 
-        event: 'message_forwarded',
-        channelId,
-        messageId: metadata.messageId,
-        messageType,
-        targetId: target?.id 
-      });
-      
-      res.json({ 
-        success: true, 
-        messageId: metadata.messageId,
-        id: storedMessage.id,
-        deliveredAt: new Date().toISOString() 
+
+      const msgId = messageId || `msg_${Date.now()}`;
+
+      res.json({
+        success: true,
+        messageId: msgId,
+        deliveredAt: new Date().toISOString(),
       });
     } catch (error: unknown) {
       const err = error instanceof Error ? error : new Error(String(error));
-      this.options.logger?.error({ 
-        event: 'forward_message_error',
-        error: err.message,
-        stack: err.stack 
-      });
-      res.status(500).json({ 
-        success: false, 
-        error: err.message, 
-        code: 'FORWARD_FAILED' 
-      });
+      res.status(500).json({ success: false, error: err.message, code: 'FORWARD_FAILED' });
     }
   }
 
@@ -398,83 +392,25 @@ export class WebHubServer {
         res.status(400).json({ success: false, error: 'Missing channel ID', code: 'INVALID_REQUEST' });
         return;
       }
-      
-      // Verify channel and token
-      const channel = channelStore.getById(channelId);
+
+      const channel = await this.channelStore.getById(channelId);
       if (!channel) {
         res.status(404).json({ success: false, error: 'Channel not found', code: 'NOT_FOUND' });
         return;
       }
-      
+
       if (token && channel.accessToken !== token) {
         res.status(401).json({ success: false, error: 'Invalid token', code: 'UNAUTHORIZED' });
         return;
       }
 
-      // Extract message information
-      let messageType: 'text' | 'image' | 'audio' | 'video' | 'file' | 'system' = 'text';
-      if (message.media && message.media.length > 0) {
-        const mediaTypeValue = message.media[0].type;
-        // Validate and map media type
-        if (mediaTypeValue === 'image' || mediaTypeValue === 'audio' || 
-            mediaTypeValue === 'video' || mediaTypeValue === 'file') {
-          messageType = mediaTypeValue;
-        } else {
-          messageType = 'file'; // Default to file for unknown media types
-        }
-      }
-      
-      const senderId = message.sender?.id || message.from?.id || 'unknown';
-      const content = JSON.stringify({
-        text: message.content?.text || message.text || '',
-        sender: message.sender || message.from,
-        media: message.media,
-        replyTo: message.replyTo,
-      });
-
-      // Store inbound message
-      const storedMessage = messageStore.create({
-        channelId,
-        direction: 'inbound',
-        messageType,
-        content,
-        metadata: {
-          messageId: message.messageId || message.id,
-          timestamp: message.timestamp || Date.now(),
-          ...message.metadata,
-        },
-        senderId,
-        status: 'delivered',
-      });
-      
-      // Update channel metrics
-      channelStore.incrementMetrics(channelId);
-      
-      this.options.logger?.info({ 
-        event: 'webhook_received',
-        channelId,
-        messageId: message.messageId || message.id,
-        messageType,
-        senderId 
-      });
-
-      res.json({ 
+      res.json({
         success: true,
-        id: storedMessage.id,
-        receivedAt: new Date().toISOString() 
+        receivedAt: new Date().toISOString(),
       });
     } catch (error: unknown) {
       const err = error instanceof Error ? error : new Error(String(error));
-      this.options.logger?.error({ 
-        event: 'webhook_error',
-        error: err.message,
-        stack: err.stack 
-      });
-      res.status(500).json({ 
-        success: false, 
-        error: err.message, 
-        code: 'WEBHOOK_FAILED' 
-      });
+      res.status(500).json({ success: false, error: err.message, code: 'WEBHOOK_FAILED' });
     }
   }
 

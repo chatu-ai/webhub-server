@@ -67,6 +67,8 @@ http://localhost:3000/api/webhub
       "name": "my-server",
       "webhubUrl": "https://example.com",
       "status": "connected",
+      "secret": "wh_secret_xxx",
+      "lastHeartbeat": "2026-02-07T18:30:00.000Z",
       "createdAt": "2026-02-07T18:00:00.000Z"
     }
   ]
@@ -77,7 +79,24 @@ http://localhost:3000/api/webhub
 
 **GET** `/channels/:id`
 
-**响应：** 包含完整频道信息
+**响应：**
+
+```json
+{
+  "success": true,
+  "data": {
+    "channelId": "uuid",
+    "name": "my-server",
+    "serverUrl": "https://example.com",
+    "status": "connected",
+    "secret": "wh_secret_xxx",
+    "description": "可选描述",
+    "createdAt": "2026-02-07T18:00:00.000Z",
+    "updatedAt": "2026-02-07T18:30:00.000Z",
+    "lastHeartbeat": "2026-02-07T18:30:00.000Z"
+  }
+}
+```
 
 ### 获取频道状态
 
