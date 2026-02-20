@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Logger } from 'pino';
 import { ChannelStore } from '../store/channelStore';
 import { MessageRouter } from '../router/messageRouter';
+import { messageStore as dbMessageStore, channelStore as dbChannelStoreRaw } from '../db/index';
 
 export interface WebHubServerOptions {
   port: number;
@@ -193,6 +194,8 @@ export class WebHubServer {
       res.status(404).json({ success: false, error: 'Channel not found', code: 'CHANNEL_NOT_FOUND' });
       return;
     }
+    // Read fresh metrics from db layer
+    const dbChannel = dbChannelStoreRaw.getById(id);
     res.json({
       success: true,
       data: {
@@ -200,6 +203,7 @@ export class WebHubServer {
         name: channel.name,
         status: channel.status,
         lastHeartbeat: channel.lastHeartbeat,
+        metrics: dbChannel?.metrics ?? null,
       },
     });
   }
@@ -229,12 +233,35 @@ export class WebHubServer {
         return;
       }
 
-      const messageId = uuidv4();
-      this.options.logger?.info({ event: 'message_sent', channelId, messageId });
+      const { target, content, messageType, metadata } = req.body;
+
+      // Determine message type from media
+      let msgType: 'text' | 'image' | 'audio' | 'video' | 'file' | 'system' = messageType || 'text';
+      if (metadata?.media && metadata.media.length > 0) {
+        const mt = metadata.media[0]?.type;
+        if (mt === 'image' || mt === 'audio' || mt === 'video' || mt === 'file') {
+          msgType = mt;
+        }
+      }
+
+      // Persist outbound message (sent by frontend/admin)
+      const stored = dbMessageStore.create({
+        channelId,
+        direction: 'outbound',
+        messageType: msgType,
+        content: content?.text || '',
+        metadata: { target, media: metadata?.media, replyTo: metadata?.replyTo, ...metadata },
+        senderId: 'webhub',
+        targetId: target?.id,
+        status: 'sent',
+      });
+
+      dbChannelStoreRaw.incrementMetrics(channelId);
+      this.options.logger?.info({ event: 'message_sent', channelId, messageId: stored.id });
 
       res.json({
         success: true,
-        data: { messageId, deliveredAt: new Date().toISOString() },
+        data: { messageId: stored.id, deliveredAt: stored.createdAt },
       });
     } catch (error: unknown) {
       const err = error instanceof Error ? error : new Error(String(error));
@@ -249,7 +276,26 @@ export class WebHubServer {
       res.status(404).json({ success: false, error: 'Channel not found', code: 'CHANNEL_NOT_FOUND' });
       return;
     }
-    res.json({ success: true, data: [] });
+    const limit = parseInt(req.query.limit as string || '50', 10);
+    const offset = parseInt(req.query.offset as string || '0', 10);
+    const messages = dbMessageStore.listByChannel(channelId, limit, offset);
+    res.json({
+      success: true,
+      data: messages.map(m => ({
+        id: m.id,
+        channelId: m.channelId,
+        direction: m.direction,          // 'inbound' = 插件推送的用户消息; 'outbound' = 前端/系统发出
+        messageType: m.messageType,
+        content: m.content,
+        metadata: m.metadata,
+        senderId: m.senderId,            // 'webhub' = 前端发送; 其他 = 插件来源用户 ID
+        senderName: m.senderName,
+        targetId: m.targetId,
+        replyTo: m.replyTo,
+        status: m.status,
+        createdAt: m.createdAt,
+      })),
+    });
   }
 
   private async sendHeartbeat(req: Request, res: Response): Promise<void> {
@@ -370,6 +416,32 @@ export class WebHubServer {
       }
 
       const msgId = messageId || `msg_${Date.now()}`;
+      const body = req.body;
+
+      // Determine message type from media
+      let messageType: 'text' | 'image' | 'audio' | 'video' | 'file' | 'system' = 'text';
+      if (body.media && body.media.length > 0) {
+        const mt = body.media[0]?.type;
+        if (mt === 'image' || mt === 'audio' || mt === 'video' || mt === 'file') {
+          messageType = mt;
+        }
+      }
+
+      // Persist message to database
+      dbMessageStore.create({
+        channelId,
+        direction: 'outbound',
+        messageType,
+        content: body.content?.text || '',
+        metadata: { target: body.target, media: body.media, replyTo: body.replyTo },
+        targetId: body.target?.id,
+        status: 'sent',
+      });
+
+      // Update channel metrics
+      dbChannelStoreRaw.incrementMetrics(channelId);
+
+      this.options.logger?.info({ event: 'message_stored', channelId, msgId, messageType });
 
       res.json({
         success: true,
@@ -404,9 +476,45 @@ export class WebHubServer {
         return;
       }
 
+      // Determine message type
+      let messageType: 'text' | 'image' | 'audio' | 'video' | 'file' | 'system' = 'text';
+      if (message.media && message.media.length > 0) {
+        const mt = message.media[0]?.type;
+        if (mt === 'image' || mt === 'audio' || mt === 'video' || mt === 'file') {
+          messageType = mt;
+        }
+      }
+
+      // Persist inbound message (from user via webhub plugin)
+      const stored = dbMessageStore.create({
+        channelId,
+        direction: 'inbound',
+        messageType,
+        content: message.content?.text || message.text || '',
+        metadata: {
+          messageId: message.messageId || message.id,
+          timestamp: message.timestamp || Date.now(),
+          media: message.media,
+          replyTo: message.replyTo,
+        },
+        senderId: message.sender?.id || message.from?.id || 'unknown',
+        senderName: message.sender?.name || message.from?.name,
+        targetId: message.target?.id,
+        status: 'delivered',
+      });
+
+      dbChannelStoreRaw.incrementMetrics(channelId);
+      this.options.logger?.info({
+        event: 'webhook_received',
+        channelId,
+        messageId: stored.id,
+        senderId: stored.senderId,
+      });
+
       res.json({
         success: true,
-        receivedAt: new Date().toISOString(),
+        id: stored.id,
+        receivedAt: stored.createdAt,
       });
     } catch (error: unknown) {
       const err = error instanceof Error ? error : new Error(String(error));
