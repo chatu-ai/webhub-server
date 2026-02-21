@@ -8,8 +8,8 @@ export class MessageStore {
     const now = new Date().toISOString();
 
     db.prepare(`
-      INSERT INTO messages (id, channel_id, direction, message_type, content, metadata, sender_id, sender_name, target_id, reply_to, status, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO messages (id, channel_id, direction, message_type, content, metadata, sender_id, sender_name, target_id, reply_to, thread_id, status, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       data.channelId,
@@ -21,6 +21,7 @@ export class MessageStore {
       data.senderName || null,
       data.targetId || null,
       data.replyTo || null,
+      data.threadId || null,
       data.status,
       now
     );
@@ -33,8 +34,58 @@ export class MessageStore {
     return row ? this.mapRow(row) : null;
   }
 
-  listByChannel(channelId: string, limit = 100, offset = 0): Message[] {
-    const rows = db.prepare('SELECT * FROM messages WHERE channel_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?').all(channelId, limit, offset) as Record<string, unknown>[];
+  listByChannel(channelId: string, limit = 100, offset = 0, threadId?: string): Message[] {
+    let sql = 'SELECT * FROM messages WHERE channel_id = ? AND status != \'deleted\'';
+    const params: (string | number | null)[] = [channelId];
+    if (threadId) {
+      sql += ' AND thread_id = ?';
+      params.push(threadId);
+    } else {
+      sql += ' AND thread_id IS NULL';
+    }
+    sql += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+    params.push(limit, offset);
+    const rows = db.prepare(sql).all(...params) as Record<string, unknown>[];
+    return rows.map(row => this.mapRow(row));
+  }
+
+  findByThread(channelId: string, threadId: string): Message[] {
+    const rows = db.prepare(
+      `SELECT * FROM messages WHERE channel_id = ? AND thread_id = ? AND status != 'deleted' ORDER BY created_at ASC`
+    ).all(channelId, threadId) as Record<string, unknown>[];
+    return rows.map(row => this.mapRow(row));
+  }
+
+  softDelete(id: string, requesterId: string, accessToken: string | null, channelAccessToken: string | null): boolean {
+    const msg = this.getById(id);
+    if (!msg) return false;
+    // Admin (valid channel accessToken) or sender can delete
+    const isAdmin = channelAccessToken != null && accessToken === channelAccessToken;
+    const isSender = msg.senderId != null && msg.senderId === requesterId;
+    if (!isAdmin && !isSender) return false;
+    db.prepare(`UPDATE messages SET status = 'deleted' WHERE id = ?`).run(id);
+    return true;
+  }
+
+  updateContent(id: string, content: string, senderId: string): Message | null {
+    const msg = this.getById(id);
+    if (!msg) return null;
+    if (msg.senderId !== senderId) return null; // 403
+    db.prepare(`UPDATE messages SET content = ? WHERE id = ? AND sender_id = ?`).run(content, id, senderId);
+    return this.getById(id);
+  }
+
+  search(channelId: string, term: string, limit = 20, after?: string): Message[] {
+    const pattern = `%${term}%`;
+    let sql = `SELECT * FROM messages WHERE channel_id = ? AND content LIKE ? COLLATE NOCASE AND status != 'deleted'`;
+    const params: (string | number | null)[] = [channelId, pattern];
+    if (after) {
+      sql += ` AND created_at < ?`;
+      params.push(after);
+    }
+    sql += ` ORDER BY created_at DESC LIMIT ?`;
+    params.push(limit);
+    const rows = db.prepare(sql).all(...params) as Record<string, unknown>[];
     return rows.map(row => this.mapRow(row));
   }
 
@@ -81,13 +132,14 @@ export class MessageStore {
       id: row.id as string,
       channelId: row.channel_id as string,
       direction: row.direction as 'inbound' | 'outbound',
-      messageType: row.message_type as 'text' | 'image' | 'audio' | 'video' | 'file' | 'system',
+      messageType: row.message_type as Message['messageType'],
       content: row.content as string,
       metadata: JSON.parse((row.metadata as string) || '{}'),
       senderId: row.sender_id as string | undefined,
       senderName: row.sender_name as string | undefined,
       targetId: row.target_id as string | undefined,
       replyTo: row.reply_to as string | undefined,
+      threadId: row.thread_id as string | undefined,
       status: row.status as Message['status'],
       createdAt: new Date(row.created_at as string),
     };

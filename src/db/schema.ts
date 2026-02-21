@@ -82,6 +82,45 @@ async function initDatabase(): Promise<Database> {
     )
   `);
 
+  // P4: add thread_id column to messages (idempotent via try/catch)
+  try { db.run(`ALTER TABLE messages ADD COLUMN thread_id TEXT`); } catch (_) { /* already exists */ }
+
+  // P4: reactions table
+  db.run(`
+    CREATE TABLE IF NOT EXISTS reactions (
+      id TEXT PRIMARY KEY,
+      message_id TEXT NOT NULL,
+      channel_id TEXT NOT NULL,
+      emoji TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      UNIQUE(message_id, emoji, user_id)
+    )
+  `);
+
+  // P4: read receipts table
+  db.run(`
+    CREATE TABLE IF NOT EXISTS read_receipts (
+      message_id TEXT NOT NULL,
+      channel_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      ts INTEGER NOT NULL,
+      PRIMARY KEY (message_id, user_id)
+    )
+  `);
+
+  // P4: directory table
+  db.run(`
+    CREATE TABLE IF NOT EXISTS directory (
+      channel_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      display_name TEXT,
+      avatar TEXT,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (channel_id, user_id)
+    )
+  `);
+
   // Save database
   const data = db.export();
   const buffer = Buffer.from(data);

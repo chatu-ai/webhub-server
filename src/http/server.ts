@@ -1,4 +1,5 @@
 import express, { Application, Request, Response, NextFunction } from 'express';
+import path from 'path';
 import http from 'http';
 import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
@@ -6,8 +7,9 @@ import { Logger } from 'pino';
 import WebSocket, { WebSocketServer } from 'ws';
 import { ChannelStore } from '../store/channelStore';
 import { MessageRouter } from '../router/messageRouter';
-import { messageStore as dbMessageStore, channelStore as dbChannelStoreRaw } from '../db/index';
+import { messageStore as dbMessageStore, channelStore as dbChannelStoreRaw, reactionStore, readReceiptStore, directoryStore } from '../db/index';
 import { broadcaster } from '../ws/broadcaster';
+import { upload, handleUpload } from './upload';
 
 export interface WebHubServerOptions {
   port: number;
@@ -62,6 +64,9 @@ export class WebHubServer {
   private setupMiddleware(): void {
     this.app.use(cors());
     this.app.use(express.json());
+    // Serve uploaded files statically
+    const uploadDir = process.env.UPLOAD_DIR || path.join(process.cwd(), 'data/uploads');
+    this.app.use('/uploads', express.static(uploadDir));
   }
 
   private setupRoutes(): void {
@@ -81,16 +86,36 @@ export class WebHubServer {
     this.app.get('/api/webhub/channels/:id/messages', this.getMessages.bind(this));
     this.app.post('/api/webhub/channels/:id/heartbeat', this.sendHeartbeat.bind(this));
 
+    // P4: File upload
+    this.app.post('/api/webhub/channels/:id/upload', upload.single('file'), handleUpload);
+
+    // P4: Message search (must be before /:msgId routes)
+    this.app.get('/api/webhub/channels/:id/messages/search', this.searchMessages.bind(this));
+
+    // P4: Per-message operations
+    this.app.get('/api/webhub/channels/:id/messages/:msgId/stream', this.streamMessage.bind(this));
+    this.app.patch('/api/webhub/channels/:id/messages/:msgId', this.editMessage.bind(this));
+    this.app.delete('/api/webhub/channels/:id/messages/:msgId', this.deleteMessage.bind(this));
+
+    // P4: Reactions
+    this.app.post('/api/webhub/channels/:id/messages/:msgId/reactions/:emoji', this.addReaction.bind(this));
+    this.app.delete('/api/webhub/channels/:id/messages/:msgId/reactions/:emoji', this.removeReaction.bind(this));
+
+    // P4: Read receipts
+    this.app.post('/api/webhub/channels/:id/messages/:msgId/read', this.markRead.bind(this));
+
+    // P4: Directory
+    this.app.get('/api/webhub/channels/:id/directory', this.listDirectory.bind(this));
+
     // Channel Auth
     this.app.post('/api/channel/register', this.registerChannel.bind(this));
     this.app.post('/api/channel/verify', this.verifyChannel.bind(this));
     this.app.post('/api/channel/connect', this.connectChannel.bind(this));
     this.app.post('/api/channel/disconnect', this.disconnectChannel.bind(this));
     this.app.get('/api/channel/status', this.getOpenClawStatus.bind(this));
-
-    // OpenClaw Integration
+    // P4: Typing indicator
+    this.app.post('/api/channel/typing', this.handleTyping.bind(this));
     this.app.post('/api/channel/messages', this.forwardToOpenClaw.bind(this));
-    this.app.post('/api/channel/webhook', this.handleWebhook.bind(this));
     this.app.get('/api/channel/messages/pending', this.getPendingMessages.bind(this));
     this.app.post('/api/channel/messages/:id/ack', this.ackMessage.bind(this));
 
@@ -285,7 +310,8 @@ export class WebHubServer {
     }
     const limit = parseInt(req.query.limit as string || '50', 10);
     const offset = parseInt(req.query.offset as string || '0', 10);
-    const messages = dbMessageStore.listByChannel(channelId, limit, offset);
+    const threadId = req.query.threadId as string | undefined;
+    const messages = dbMessageStore.listByChannel(channelId, limit, offset, threadId);
     res.json({
       success: true,
       data: messages.map(m => ({
@@ -426,8 +452,10 @@ export class WebHubServer {
       const body = req.body;
 
       // Determine message type from media
-      let messageType: 'text' | 'image' | 'audio' | 'video' | 'file' | 'system' = 'text';
-      if (body.media && body.media.length > 0) {
+      let messageType: 'text' | 'image' | 'audio' | 'video' | 'file' | 'system' | 'richCard' | 'poll' = 'text';
+      if (body.messageType && body.messageType !== 'text') {
+        messageType = body.messageType;
+      } else if (body.media && body.media.length > 0) {
         const mt = body.media[0]?.type;
         if (mt === 'image' || mt === 'audio' || mt === 'video' || mt === 'file') {
           messageType = mt;
@@ -440,7 +468,7 @@ export class WebHubServer {
         direction: 'inbound',
         messageType,
         content: body.content?.text || '',
-        metadata: { target: body.target, media: body.media, replyTo: body.replyTo },
+        metadata: { target: body.target, media: body.media, replyTo: body.replyTo, ...(body.metadata ?? {}) },
         targetId: body.target?.id,
         status: 'sent',
       });
@@ -591,6 +619,155 @@ export class WebHubServer {
       const err = error instanceof Error ? error : new Error(String(error));
       res.status(500).json({ success: false, error: err.message, code: 'INTERNAL_ERROR' });
     }
+  }
+
+  // P4 — Search messages by content
+  private async searchMessages(req: Request, res: Response): Promise<void> {
+    const { id: channelId } = req.params;
+    const q = (req.query.q as string || '').trim();
+    const limit = Math.min(parseInt(req.query.limit as string || '20', 10), 100);
+    const after = req.query.after as string | undefined;
+    if (!q) {
+      res.status(400).json({ success: false, error: 'q parameter is required' });
+      return;
+    }
+    const results = dbMessageStore.search(channelId, q, limit, after);
+    res.json({ success: true, data: results });
+  }
+
+  // P4 — SSE stream for a single message (streaming AI reply)
+  private async streamMessage(req: Request, res: Response): Promise<void> {
+    const { id: channelId, msgId } = req.params;
+    const msg = dbMessageStore.getById(msgId);
+    if (!msg || msg.channelId !== channelId) {
+      res.status(404).json({ success: false, error: 'Message not found' });
+      return;
+    }
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+    // Deliver current content as a single chunk (already complete)
+    const chunk = JSON.stringify({ chunk: msg.content, done: true });
+    res.write(`data: ${chunk}\n\n`);
+    res.end();
+  }
+
+  // P4 — Edit message content (senderId auth)
+  private async editMessage(req: Request, res: Response): Promise<void> {
+    const { id: channelId, msgId } = req.params;
+    const { content, senderId } = req.body;
+    if (!content || !senderId) {
+      res.status(400).json({ success: false, error: 'content and senderId are required' });
+      return;
+    }
+    const updated = dbMessageStore.updateContent(msgId, content, senderId);
+    if (!updated) {
+      // Could be not found or senderId mismatch
+      const existing = dbMessageStore.getById(msgId);
+      if (!existing || existing.channelId !== channelId) {
+        res.status(404).json({ success: false, error: 'Message not found' });
+      } else {
+        res.status(403).json({ success: false, error: 'Forbidden: senderId does not match' });
+      }
+      return;
+    }
+    broadcaster.broadcast(channelId, { type: 'message_updated', data: updated });
+    res.json({ success: true, data: updated });
+  }
+
+  // P4 — Soft-delete message (admin or sender)
+  private async deleteMessage(req: Request, res: Response): Promise<void> {
+    const { id: channelId, msgId } = req.params;
+    const requesterId = (req.query.senderId as string) || (req.body?.senderId as string) || '';
+    const providedToken = (req.headers.authorization?.replace('Bearer ', '') || '') as string;
+
+    const channel = await this.channelStore.getById(channelId);
+    const channelAccessToken = channel?.accessToken || null;
+
+    const ok = dbMessageStore.softDelete(msgId, requesterId, providedToken || null, channelAccessToken);
+    if (!ok) {
+      const existing = dbMessageStore.getById(msgId);
+      if (!existing || existing.channelId !== channelId) {
+        res.status(404).json({ success: false, error: 'Message not found' });
+      } else {
+        res.status(403).json({ success: false, error: 'Forbidden' });
+      }
+      return;
+    }
+    const updated = dbMessageStore.getById(msgId);
+    broadcaster.broadcast(channelId, { type: 'message_updated', data: updated });
+    res.json({ success: true });
+  }
+
+  // P4 — Add reaction
+  private async addReaction(req: Request, res: Response): Promise<void> {
+    const { id: channelId, msgId, emoji } = req.params;
+    const userId = (req.query.userId as string) || (req.body?.userId as string);
+    if (!userId) {
+      res.status(400).json({ success: false, error: 'userId is required' });
+      return;
+    }
+    const reaction = reactionStore.add(channelId, msgId, emoji, userId);
+    broadcaster.broadcast(channelId, { type: 'reaction_added', data: reaction });
+    res.json({ success: true, data: reaction });
+  }
+
+  // P4 — Remove reaction
+  private async removeReaction(req: Request, res: Response): Promise<void> {
+    const { id: channelId, msgId, emoji } = req.params;
+    const userId = (req.query.userId as string) || (req.body?.userId as string);
+    if (!userId) {
+      res.status(400).json({ success: false, error: 'userId is required' });
+      return;
+    }
+    reactionStore.remove(msgId, emoji, userId);
+    broadcaster.broadcast(channelId, { type: 'reaction_removed', data: { messageId: msgId, emoji, userId, channelId } });
+    res.json({ success: true });
+  }
+
+  // P4 — Mark message as read (read receipt)
+  private async markRead(req: Request, res: Response): Promise<void> {
+    const { id: channelId, msgId } = req.params;
+    const { userId } = req.body;
+    if (!userId) {
+      res.status(400).json({ success: false, error: 'userId is required' });
+      return;
+    }
+    const receipt = readReceiptStore.markRead(msgId, channelId, userId);
+    broadcaster.broadcast(channelId, { type: 'read', data: { messageId: msgId, userId, ts: receipt.ts } });
+    res.json({ success: true, data: receipt });
+  }
+
+  // P4 — List directory entries (participants)
+  private async listDirectory(req: Request, res: Response): Promise<void> {
+    const { id: channelId } = req.params;
+    const limit = Math.min(parseInt(req.query.limit as string || '50', 10), 200);
+    const after = req.query.after as string | undefined;
+    const entries = directoryStore.list(channelId, limit, after);
+    res.json({ success: true, data: entries });
+  }
+
+  // P4 — Plugin typing indicator
+  private async handleTyping(req: Request, res: Response): Promise<void> {
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.replace('Bearer ', '').trim();
+    const { channelId, username } = req.body;
+    if (!channelId || !username) {
+      res.status(400).json({ success: false, error: 'channelId and username are required' });
+      return;
+    }
+    if (token) {
+      const channel = await this.channelStore.getById(channelId);
+      if (!channel || channel.accessToken !== token) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+    }
+    const ts = Date.now();
+    broadcaster.broadcast(channelId, { type: 'typing', data: { channelId, username, ts } });
+    res.json({ success: true });
   }
 
   async start(): Promise<void> {

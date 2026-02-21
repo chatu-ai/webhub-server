@@ -29,20 +29,83 @@ export interface ChannelMetrics {
   connections: number;
 }
 
+export interface Attachment {
+  url: string;
+  size: number;
+  mimeType: string;
+  filename: string;
+}
+
+export interface RichCard {
+  title: string;
+  subtitle?: string;
+  imageUrl?: string;
+  actions?: { label: string; value: string }[];
+}
+
+export interface Poll {
+  question: string;
+  options: { id: string; label: string }[];
+  multiSelect?: boolean;
+}
+
 export interface Message {
   id: string;
   channelId: string;
   direction: 'inbound' | 'outbound';
-  messageType: 'text' | 'image' | 'audio' | 'video' | 'file' | 'system';
+  messageType: 'text' | 'image' | 'audio' | 'video' | 'file' | 'system' | 'richCard' | 'poll';
   content: string;
-  metadata: Record<string, unknown>;
+  metadata: {
+    attachments?: Attachment[];
+    streaming?: boolean;
+    richCard?: RichCard;
+    poll?: Poll;
+    [key: string]: unknown;
+  };
   senderId?: string;
   senderName?: string;
   targetId?: string;
   replyTo?: string;
-  status: 'pending' | 'sent' | 'delivered' | 'read' | 'failed';
+  threadId?: string;
+  status: 'pending' | 'sent' | 'delivered' | 'read' | 'failed' | 'deleted';
   createdAt: Date;
 }
+
+// P4 Reaction
+export interface Reaction {
+  id: string;
+  messageId: string;
+  channelId: string;
+  emoji: string;
+  userId: string;
+  createdAt: Date;
+}
+
+// P4 Read Receipt
+export interface ReadReceipt {
+  messageId: string;
+  channelId: string;
+  userId: string;
+  ts: number;
+}
+
+// P4 Directory Entry
+export interface DirectoryEntry {
+  channelId: string;
+  userId: string;
+  displayName?: string;
+  avatar?: string;
+  updatedAt: Date;
+}
+
+// P4 WS Broadcast Event union
+export type BroadcastEvent =
+  | { type: 'message'; data: Message }
+  | { type: 'message_updated'; data: Message }
+  | { type: 'reaction_added'; data: Reaction }
+  | { type: 'reaction_removed'; data: Reaction }
+  | { type: 'typing'; data: { channelId: string; username: string; ts: number } }
+  | { type: 'read'; data: { messageId: string; userId: string; ts: number } };
 
 export interface MessageQueueItem {
   id: string;
