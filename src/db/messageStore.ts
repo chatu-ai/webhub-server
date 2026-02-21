@@ -50,6 +50,23 @@ export class MessageStore {
     return row?.count || 0;
   }
 
+  listPendingUserMessages(channelId: string, after: string | null, limit: number): Message[] {
+    let sql = `SELECT * FROM messages WHERE channel_id = ? AND direction = 'outbound' AND status IN ('sent', 'pending')`;
+    const params: (string | number | null)[] = [channelId];
+    if (after) {
+      sql += ` AND created_at > ?`;
+      params.push(after);
+    }
+    sql += ` ORDER BY created_at ASC LIMIT ?`;
+    params.push(limit);
+    const rows = (db.prepare(sql).all(...params)) as Record<string, unknown>[];
+    return rows.map(row => this.mapRow(row));
+  }
+
+  markProcessed(id: string): void {
+    db.prepare(`UPDATE messages SET status = 'delivered' WHERE id = ? AND status != 'delivered'`).run(id);
+  }
+
   delete(id: string): boolean {
     db.prepare('DELETE FROM messages WHERE id = ?').run(id);
     return true;

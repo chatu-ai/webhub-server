@@ -3,9 +3,11 @@ import http from 'http';
 import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
 import { Logger } from 'pino';
+import WebSocket, { WebSocketServer } from 'ws';
 import { ChannelStore } from '../store/channelStore';
 import { MessageRouter } from '../router/messageRouter';
 import { messageStore as dbMessageStore, channelStore as dbChannelStoreRaw } from '../db/index';
+import { broadcaster } from '../ws/broadcaster';
 
 export interface WebHubServerOptions {
   port: number;
@@ -18,6 +20,7 @@ export class WebHubServer {
   private app: Application;
   private options: WebHubServerOptions;
   private server: http.Server | null = null;
+  private wsServer: WebSocketServer | null = null;
   private channelStore: ChannelStore;
 
   constructor(options: WebHubServerOptions) {
@@ -88,6 +91,8 @@ export class WebHubServer {
     // OpenClaw Integration
     this.app.post('/api/channel/messages', this.forwardToOpenClaw.bind(this));
     this.app.post('/api/channel/webhook', this.handleWebhook.bind(this));
+    this.app.get('/api/channel/messages/pending', this.getPendingMessages.bind(this));
+    this.app.post('/api/channel/messages/:id/ack', this.ackMessage.bind(this));
 
     // Error handler
     this.app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
@@ -158,6 +163,7 @@ export class WebHubServer {
         serverUrl: ch.serverUrl,
         status: ch.status,
         secret: ch.secret,
+        accessToken: ch.accessToken,
         lastHeartbeat: ch.lastHeartbeat,
         createdAt: ch.createdAt,
       })),
@@ -179,6 +185,7 @@ export class WebHubServer {
         serverUrl: channel.serverUrl,
         status: channel.status,
         secret: channel.secret,
+        accessToken: channel.accessToken,
         description: channel.description,
         createdAt: channel.createdAt,
         updatedAt: channel.updatedAt,
@@ -428,15 +435,18 @@ export class WebHubServer {
       }
 
       // Persist message to database
-      dbMessageStore.create({
+      const stored = dbMessageStore.create({
         channelId,
-        direction: 'outbound',
+        direction: 'inbound',
         messageType,
         content: body.content?.text || '',
         metadata: { target: body.target, media: body.media, replyTo: body.replyTo },
         targetId: body.target?.id,
         status: 'sent',
       });
+
+      // Notify WebSocket subscribers of new message
+      broadcaster.broadcast(channelId, { type: 'message', data: stored });
 
       // Update channel metrics
       dbChannelStoreRaw.incrementMetrics(channelId);
@@ -504,6 +514,10 @@ export class WebHubServer {
       });
 
       dbChannelStoreRaw.incrementMetrics(channelId);
+
+      // Notify WebSocket subscribers of new webhook message
+      broadcaster.broadcast(channelId, { type: 'message', data: stored });
+
       this.options.logger?.info({
         event: 'webhook_received',
         channelId,
@@ -522,9 +536,96 @@ export class WebHubServer {
     }
   }
 
+  private async getPendingMessages(req: Request, res: Response): Promise<void> {
+    try {
+      const token = req.headers['x-channel-token'] as string;
+      const channelId = req.query['channelId'] as string;
+      const after = (req.query['after'] as string) || null;
+      const limit = Math.min(parseInt((req.query['limit'] as string) || '20', 10), 100);
+
+      if (!token) {
+        res.status(401).json({ success: false, error: 'Missing channel token', code: 'UNAUTHORIZED' });
+        return;
+      }
+      if (!channelId) {
+        res.status(400).json({ success: false, error: 'Missing channelId', code: 'INVALID_REQUEST' });
+        return;
+      }
+
+      const channel = await this.channelStore.getById(channelId);
+      if (!channel || channel.accessToken !== token) {
+        res.status(401).json({ success: false, error: 'Invalid token', code: 'UNAUTHORIZED' });
+        return;
+      }
+
+      const messages = dbMessageStore.listPendingUserMessages(channelId, after, limit);
+      res.json({ success: true, data: messages });
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      res.status(500).json({ success: false, error: err.message, code: 'INTERNAL_ERROR' });
+    }
+  }
+
+  private async ackMessage(req: Request, res: Response): Promise<void> {
+    try {
+      const token = req.headers['x-channel-token'] as string;
+      const channelId = req.headers['x-channel-id'] as string;
+      const { id } = req.params;
+
+      if (!token) {
+        res.status(401).json({ success: false, error: 'Missing channel token', code: 'UNAUTHORIZED' });
+        return;
+      }
+
+      if (channelId) {
+        const channel = await this.channelStore.getById(channelId);
+        if (!channel || channel.accessToken !== token) {
+          res.status(401).json({ success: false, error: 'Invalid token', code: 'UNAUTHORIZED' });
+          return;
+        }
+      }
+
+      dbMessageStore.markProcessed(id);
+      res.json({ success: true });
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      res.status(500).json({ success: false, error: err.message, code: 'INTERNAL_ERROR' });
+    }
+  }
+
   async start(): Promise<void> {
     return new Promise((resolve) => {
       this.server = this.app.listen(this.options.port, () => {
+        // Attach WebSocket server to the same HTTP server at /api/webhub/ws
+        this.wsServer = new WebSocketServer({ server: this.server!, path: '/api/webhub/ws' });
+        this.wsServer.on('connection', async (ws: WebSocket, req: http.IncomingMessage) => {
+          const url = new URL(req.url ?? '', `http://localhost:${this.options.port}`);
+          const channelId = url.searchParams.get('channelId') ?? '';
+          const token = url.searchParams.get('token') ?? '';
+
+          if (!channelId || !token) {
+            ws.close(4001, 'Missing channelId or token');
+            return;
+          }
+
+          const channel = await this.channelStore.getById(channelId);
+          if (!channel || channel.accessToken !== token) {
+            ws.close(4001, 'Unauthorized');
+            return;
+          }
+
+          broadcaster.subscribe(channelId, ws);
+          this.options.logger?.info({ event: 'ws_connected', channelId });
+
+          ws.on('close', () => {
+            broadcaster.unsubscribe(channelId, ws);
+            this.options.logger?.info({ event: 'ws_disconnected', channelId });
+          });
+          ws.on('error', () => {
+            broadcaster.unsubscribe(channelId, ws);
+          });
+        });
+
         this.options.logger?.info({
           event: 'started',
           port: this.options.port,
@@ -536,6 +637,10 @@ export class WebHubServer {
   }
 
   async stop(): Promise<void> {
+    if (this.wsServer) {
+      this.wsServer.close();
+      this.wsServer = null;
+    }
     if (this.server) {
       return new Promise((resolve) => {
         this.server!.close(() => {
