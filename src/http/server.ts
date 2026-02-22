@@ -26,6 +26,8 @@ export class WebHubServer {
   private channelStore: ChannelStore;
   /** T015: last plugin version reported via POST /api/channel/connect */
   private pluginVersion: string | null = null;
+  /** ID of the channel currently connected by the openclaw plugin (null when disconnected) */
+  private connectedChannelId: string | null = null;
 
   constructor(options: WebHubServerOptions) {
     this.options = options;
@@ -156,6 +158,8 @@ export class WebHubServer {
 
     // T014: version endpoint
     this.app.get('/api/channel/version', this.getChannelVersion.bind(this));
+    this.app.get('/api/channel/active', this.getActiveChannel.bind(this));
+    this.app.get('/api/webhub/channel/active', this.getActiveChannel.bind(this));
 
     // Error handler
     this.app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
@@ -435,6 +439,7 @@ export class WebHubServer {
     }
 
     await this.channelStore.updateStatus(channelId, 'connected');
+    this.connectedChannelId = channelId;
     this.options.logger?.info({ event: 'channel_connected', channelId, pluginVersion: this.pluginVersion });
     res.json({ success: true, data: { status: 'connected' } });
   }
@@ -450,8 +455,14 @@ export class WebHubServer {
     }
 
     await this.channelStore.updateStatus(channelId, 'disconnected');
+    if (this.connectedChannelId === channelId) this.connectedChannelId = null;
     this.options.logger?.info({ event: 'channel_disconnected', channelId });
     res.json({ success: true, data: { status: 'disconnected' } });
+  }
+
+  /** Return the channelId currently connected by the plugin (null when none) */
+  private getActiveChannel(_req: Request, res: Response): void {
+    res.json({ success: true, data: { channelId: this.connectedChannelId } });
   }
 
   /** T007: return real channel status from DB instead of hardcoded 'connected' (BUG-01 fix) */
