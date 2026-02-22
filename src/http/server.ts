@@ -24,6 +24,8 @@ export class WebHubServer {
   private server: http.Server | null = null;
   private wsServer: WebSocketServer | null = null;
   private channelStore: ChannelStore;
+  /** T015: last plugin version reported via POST /api/channel/connect */
+  private pluginVersion: string | null = null;
 
   constructor(options: WebHubServerOptions) {
     this.options = options;
@@ -32,23 +34,52 @@ export class WebHubServer {
       this.channelStore = options.channelStore;
     } else {
       const { channelStore: dbChannelStore } = require('../db/index');
-      // Wrap synchronous db store in async-compatible interface
+      // Wrap synchronous db store in async-compatible interface.
+      // NOTE: src/types Channel uses `serverUrl`; src/db/types Channel uses `webhubUrl`.
+      // The adapter translates between the two and injects default config/metrics.
       this.channelStore = {
-        create: (data: Parameters<ChannelStore['create']>[0]) => Promise.resolve(dbChannelStore.create(data)),
-        getById: (id: string) => Promise.resolve(dbChannelStore.getById(id)),
-        getBySecret: (secret: string) => Promise.resolve(dbChannelStore.getBySecret(secret)),
-        getByAccessToken: (token: string) => Promise.resolve(dbChannelStore.getByAccessToken(token)),
-        updateStatus: (id: string, status: Parameters<ChannelStore['updateStatus']>[1]) =>
-          Promise.resolve(dbChannelStore.updateStatus(id, status)),
+        create: (data: Parameters<ChannelStore['create']>[0]) => {
+          const dbData = {
+            ...data,
+            webhubUrl: (data as any).serverUrl ?? (data as any).webhubUrl ?? '',
+            config: (data as any).config ?? {},
+            metrics: (data as any).metrics ?? {
+              totalMessages: 0, messagesToday: 0, connections: 0,
+            },
+          };
+          const result = dbChannelStore.create(dbData);
+          // Normalise back to store Channel shape (serverUrl)
+          return Promise.resolve({ ...result, serverUrl: result.webhubUrl ?? result.serverUrl });
+        },
+        getById: (id: string) => {
+          const r = dbChannelStore.getById(id);
+          return Promise.resolve(r ? { ...r, serverUrl: r.webhubUrl ?? r.serverUrl } : null);
+        },
+        getBySecret: (secret: string) => {
+          const r = dbChannelStore.getBySecret(secret);
+          return Promise.resolve(r ? { ...r, serverUrl: r.webhubUrl ?? r.serverUrl } : null);
+        },
+        getByAccessToken: (token: string) => {
+          const r = dbChannelStore.getByAccessToken(token);
+          return Promise.resolve(r ? { ...r, serverUrl: r.webhubUrl ?? r.serverUrl } : null);
+        },
+        updateStatus: (id: string, status: Parameters<ChannelStore['updateStatus']>[1]) => {
+          const r = dbChannelStore.updateStatus(id, status);
+          return Promise.resolve(r ? { ...r, serverUrl: r.webhubUrl ?? r.serverUrl } : null);
+        },
         updateLastHeartbeat: (id: string) => {
           dbChannelStore.updateLastHeartbeat(id);
-          return Promise.resolve(dbChannelStore.getById(id));
+          const r = dbChannelStore.getById(id);
+          return Promise.resolve(r ? { ...r, serverUrl: r.webhubUrl ?? r.serverUrl } : null);
         },
         delete: (id: string) => {
           const r = dbChannelStore.delete(id);
           return Promise.resolve(typeof r === 'boolean' ? r : true);
         },
-        list: () => Promise.resolve(dbChannelStore.list()),
+        list: () => {
+          const rows = dbChannelStore.list();
+          return Promise.resolve(rows.map((r: any) => ({ ...r, serverUrl: r.webhubUrl ?? r.serverUrl })));
+        },
         incrementMetrics: (id: string) => {
           if (dbChannelStore.incrementMetrics) dbChannelStore.incrementMetrics(id);
           return Promise.resolve();
@@ -115,9 +146,16 @@ export class WebHubServer {
     this.app.get('/api/channel/status', this.getOpenClawStatus.bind(this));
     // P4: Typing indicator
     this.app.post('/api/channel/typing', this.handleTyping.bind(this));
+    this.app.post('/api/webhub/channel/typing', this.handleTyping.bind(this));
     this.app.post('/api/channel/messages', this.forwardToOpenClaw.bind(this));
     this.app.get('/api/channel/messages/pending', this.getPendingMessages.bind(this));
     this.app.post('/api/channel/messages/:id/ack', this.ackMessage.bind(this));
+
+    // T011: register handleWebhook route (BUG-02 fix)
+    this.app.post('/api/webhooks/:channelId', this.handleWebhook.bind(this));
+
+    // T014: version endpoint
+    this.app.get('/api/channel/version', this.getChannelVersion.bind(this));
 
     // Error handler
     this.app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
@@ -382,7 +420,7 @@ export class WebHubServer {
   }
 
   private async connectChannel(req: Request, res: Response): Promise<void> {
-    const { channelId } = req.body;
+    const { channelId, pluginVersion } = req.body;
     const token = req.headers['x-access-token'] as string;
 
     const channel = await this.channelStore.getByAccessToken(token);
@@ -391,8 +429,13 @@ export class WebHubServer {
       return;
     }
 
+    // T015: capture optional plugin version reported by the plugin
+    if (typeof pluginVersion === 'string' && pluginVersion) {
+      this.pluginVersion = pluginVersion;
+    }
+
     await this.channelStore.updateStatus(channelId, 'connected');
-    this.options.logger?.info({ event: 'channel_connected', channelId });
+    this.options.logger?.info({ event: 'channel_connected', channelId, pluginVersion: this.pluginVersion });
     res.json({ success: true, data: { status: 'connected' } });
   }
 
@@ -411,12 +454,44 @@ export class WebHubServer {
     res.json({ success: true, data: { status: 'disconnected' } });
   }
 
+  /** T007: return real channel status from DB instead of hardcoded 'connected' (BUG-01 fix) */
   private async getOpenClawStatus(req: Request, res: Response): Promise<void> {
+    const channelId = req.headers['x-channel-id'] as string | undefined;
+    if (channelId) {
+      const ch = await this.channelStore.getById(channelId);
+      if (ch) {
+        res.json({
+          success: true,
+          data: {
+            status: ch.status,
+            channelId: ch.id,
+            lastHeartbeat: ch.lastHeartbeat ?? null,
+          },
+        });
+        return;
+      }
+    }
+    // No channelId provided — return generic service status
     res.json({
       success: true,
       data: {
-        status: 'connected',
+        status: 'unknown',
         timestamp: new Date().toISOString(),
+      },
+    });
+  }
+
+  /** T014: version endpoint — returns service + optional plugin version (FR-006) */
+  private async getChannelVersion(_req: Request, res: Response): Promise<void> {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const pkg = require('../../package.json') as { version: string };
+    res.json({
+      success: true,
+      data: {
+        serviceVersion: pkg.version,
+        buildTime: process.env.BUILD_TIME ?? null,
+        nodeVersion: process.versions.node,
+        pluginVersion: this.pluginVersion,
       },
     });
   }
@@ -494,7 +569,8 @@ export class WebHubServer {
 
   private async handleWebhook(req: Request, res: Response): Promise<void> {
     try {
-      const channelId = req.headers['x-channel-id'] as string;
+      // T011: channelId from URL param (primary) or header (fallback for backward compat)
+      const channelId = (req.params.channelId as string | undefined) || (req.headers['x-channel-id'] as string);
       const token = req.headers['x-channel-token'] as string;
       const message = req.body;
 
