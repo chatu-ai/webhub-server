@@ -238,3 +238,72 @@ ws.onmessage = (event) => {
 | `UNAUTHORIZED` | 凭据或令牌无效 |
 | `INVALID_REQUEST` | 缺少必需字段 |
 | `INTERNAL_ERROR` | 服务器错误 |
+
+---
+
+## 频道状态（已修复 — BUG-01）
+
+**GET** `/api/channel/status`
+
+从数据库返回频道的**真实**连接状态。此前该端点始终硬编码返回 `"connected"`，现已修复。
+
+**请求头：**
+
+| 头部 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `X-Channel-ID` | string | 否 | 要查询的频道 ID。若不填，返回通用 `unknown` 状态。 |
+
+**响应：**
+
+```json
+{
+  "success": true,
+  "data": {
+    "status": "connected",
+    "channelId": "wh_ch_abc123",
+    "lastHeartbeat": "2024-01-01T00:00:00.000Z"
+  }
+}
+```
+
+未提供 `X-Channel-ID` 时：
+
+```json
+{
+  "success": true,
+  "data": {
+    "status": "unknown",
+    "timestamp": "2024-01-01T00:00:00.000Z"
+  }
+}
+```
+
+---
+
+## 服务版本
+
+**GET** `/api/channel/version`
+
+返回当前服务版本及（可选）已连接的插件版本。
+
+**响应：**
+
+```json
+{
+  "success": true,
+  "data": {
+    "serviceVersion": "1.0.0",
+    "buildTime": null,
+    "nodeVersion": "20.11.0",
+    "pluginVersion": "0.1.0"
+  }
+}
+```
+
+`pluginVersion` 在插件通过 `POST /api/channel/connect` 携带 `pluginVersion` 字段连接后填充，否则为 `null`。
+
+**使用场景：** 插件升级重载后，调用此端点确认新版本已生效：
+
+```bash
+curl http://localhost:3000/api/channel/version
+```

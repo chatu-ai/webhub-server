@@ -119,3 +119,21 @@ describe('MessageStore.markProcessed', () => {
     expect(updated2?.status).toBe('sent');
   });
 });
+
+/** T006: thread_id column exists and listByChannel does not throw */
+describe('MessageStore.listByChannel — thread_id column (BUG-04 fix)', () => {
+  it('listByChannel returns messages without SQL error after thread_id migration', () => {
+    store.create({ channelId: 'ch_thread', direction: 'inbound', messageType: 'text', content: 'hello', metadata: {}, status: 'pending' });
+    expect(() => store.listByChannel('ch_thread', 20, undefined)).not.toThrow();
+  });
+
+  it('listByChannel returns correct messages for channel', () => {
+    store.create({ channelId: 'ch_thr2', direction: 'inbound', messageType: 'text', content: 'msg1', metadata: {}, status: 'pending' });
+    store.create({ channelId: 'ch_thr2', direction: 'outbound', messageType: 'text', content: 'msg2', metadata: {}, status: 'pending' });
+    store.create({ channelId: 'ch_other', direction: 'inbound', messageType: 'text', content: 'other', metadata: {}, status: 'pending' });
+
+    const results = store.listByChannel('ch_thr2', 20, undefined);
+    expect(results.length).toBe(2);
+    expect(results.every((m) => m.channelId === 'ch_thr2')).toBe(true);
+  });
+});

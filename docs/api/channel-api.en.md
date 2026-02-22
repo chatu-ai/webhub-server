@@ -238,3 +238,72 @@ ws.onmessage = (event) => {
 | `UNAUTHORIZED` | Invalid credentials or token |
 | `INVALID_REQUEST` | Missing required fields |
 | `INTERNAL_ERROR` | Server error |
+
+---
+
+## Channel Status (Fixed — BUG-01)
+
+**GET** `/api/channel/status`
+
+Returns the **real** connection status of the channel from the database. Previously this endpoint returned a hardcoded `"connected"` regardless of actual state — this has been fixed.
+
+**Request Headers:**
+
+| Header | Type | Required | Description |
+|--------|------|----------|-------------|
+| `X-Channel-ID` | string | No | Channel ID to look up. If omitted, returns generic `unknown` status. |
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "status": "connected",
+    "channelId": "wh_ch_abc123",
+    "lastHeartbeat": "2024-01-01T00:00:00.000Z"
+  }
+}
+```
+
+When no `X-Channel-ID` is provided:
+
+```json
+{
+  "success": true,
+  "data": {
+    "status": "unknown",
+    "timestamp": "2024-01-01T00:00:00.000Z"
+  }
+}
+```
+
+---
+
+## Service Version
+
+**GET** `/api/channel/version`
+
+Returns the current service version and optionally the connected plugin version.
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "serviceVersion": "1.0.0",
+    "buildTime": null,
+    "nodeVersion": "20.11.0",
+    "pluginVersion": "0.1.0"
+  }
+}
+```
+
+`pluginVersion` is populated after a plugin calls `POST /api/channel/connect` with a `pluginVersion` field in the request body. It is `null` if no connection has been established yet.
+
+**Use case:** Call this endpoint after reloading/upgrading a plugin to verify the new version is active:
+
+```bash
+curl http://localhost:3000/api/channel/version
+```
