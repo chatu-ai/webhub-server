@@ -9,7 +9,8 @@ import { ChannelStore } from '../store/channelStore';
 import { MessageRouter } from '../router/messageRouter';
 import { messageStore as dbMessageStore, channelStore as dbChannelStoreRaw, reactionStore, readReceiptStore, directoryStore } from '../db/index';
 import { broadcaster } from '../ws/broadcaster';
-import { upload, handleUpload } from './upload';
+import { pluginWsServer } from '../ws/pluginWsServer';
+import { upload, handleUpload, handleUploadError } from './upload';
 
 export interface WebHubServerOptions {
   port: number;
@@ -28,6 +29,10 @@ export class WebHubServer {
   private pluginVersion: string | null = null;
   /** ID of the channel currently connected by the openclaw plugin (null when disconnected) */
   private connectedChannelId: string | null = null;
+
+  /** T022 Plugin-Channel Realtime: in-memory rate-limit map for quick-register endpoint.
+   *  Maps IP -> array of request timestamps (ms). */
+  private quickRegRateMap: Map<string, number[]> = new Map();
 
   constructor(options: WebHubServerOptions) {
     this.options = options;
@@ -119,8 +124,13 @@ export class WebHubServer {
     this.app.get('/api/webhub/channels/:id/messages', this.getMessages.bind(this));
     this.app.post('/api/webhub/channels/:id/heartbeat', this.sendHeartbeat.bind(this));
 
-    // P4: File upload
-    this.app.post('/api/webhub/channels/:id/upload', upload.single('file'), handleUpload);
+    // P4: File upload (T027: 10 MB limit enforced in upload.ts; multer errors caught via callback)
+    this.app.post('/api/webhub/channels/:id/upload', (req: Request, res: Response, next: NextFunction) => {
+      upload.single('file')(req, res, (err: any) => {
+        if (err) return handleUploadError(err, req, res, next);
+        handleUpload(req, res);
+      });
+    });
 
     // P4: Message search (must be before /:msgId routes)
     this.app.get('/api/webhub/channels/:id/messages/search', this.searchMessages.bind(this));
@@ -146,6 +156,8 @@ export class WebHubServer {
     this.app.post('/api/channel/connect', this.connectChannel.bind(this));
     this.app.post('/api/channel/disconnect', this.disconnectChannel.bind(this));
     this.app.get('/api/channel/status', this.getOpenClawStatus.bind(this));
+    // T022 Plugin-Channel Realtime: 2-step quick registration (key + url → credentials)
+    this.app.post('/api/channel/quick-register', this.quickRegisterChannel.bind(this));
     // P4: Typing indicator
     this.app.post('/api/channel/typing', this.handleTyping.bind(this));
     this.app.post('/api/webhub/channel/typing', this.handleTyping.bind(this));
@@ -401,6 +413,122 @@ export class WebHubServer {
       data: {
         channelId: channel.id,
         accessToken: channel.accessToken,
+      },
+    });
+  }
+
+  /**
+   * T022 Plugin-Channel Realtime: POST /api/channel/quick-register
+   * Accepts { key, url, mode? } — automatically creates/retrieves a channel.
+   * No pre-existing channelId or secret required (2-step setup).
+   *
+   * Responses:
+   *   200 OK              – key already registered, returning existing credentials (idempotent)
+   *   201 Created         – new channel created
+   *   400 Bad Request     – missing key or url
+   *   409 Conflict        – key registered with a different url
+   *   422 Unprocessable   – url format invalid
+   *   429 Too Many Requests – rate limit exceeded (10 req/min per IP)
+   */
+  private async quickRegisterChannel(req: Request, res: Response): Promise<void> {
+    // ── Rate limit (10 req/min per IP) ──────────────────────────────────────
+    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim()
+      || req.socket?.remoteAddress
+      || 'unknown';
+
+    const now = Date.now();
+    const windowMs = 60_000;
+    const maxRequests = 10;
+
+    const ipTimes = (this.quickRegRateMap.get(ip) ?? []).filter(t => now - t < windowMs);
+
+    if (ipTimes.length >= maxRequests) {
+      const oldest = ipTimes[0];
+      const retryAfter = Math.ceil((oldest + windowMs - now) / 1000);
+      res.setHeader('Retry-After', String(retryAfter));
+      res.status(429).json({
+        success: false,
+        error: 'Rate limit exceeded',
+        code: 'RATE_LIMITED',
+        retryAfter,
+      });
+      return;
+    }
+
+    ipTimes.push(now);
+    this.quickRegRateMap.set(ip, ipTimes);
+
+    // ── Input validation ─────────────────────────────────────────────────────
+    const { key, url, mode } = req.body as { key?: string; url?: string; mode?: string };
+
+    if (!key || !url) {
+      res.status(400).json({
+        success: false,
+        error: 'Missing required fields: key, url',
+        code: 'MISSING_FIELDS',
+      });
+      return;
+    }
+
+    try {
+      new URL(url); // validates URL format
+    } catch {
+      res.status(422).json({
+        success: false,
+        error: 'Invalid url format',
+        code: 'INVALID_URL',
+      });
+      return;
+    }
+
+    // ── Upsert channel ───────────────────────────────────────────────────────
+    const existing = await this.channelStore.getBySecret(key);
+
+    if (existing) {
+      // Key already registered — check URL conflict
+      if (existing.serverUrl && existing.serverUrl !== url) {
+        res.status(409).json({
+          success: false,
+          error: 'Key already registered with a different url',
+          code: 'KEY_CONFLICT',
+        });
+        return;
+      }
+      // Idempotent: return existing credentials
+      res.status(200).json({
+        success: true,
+        data: {
+          channelId: existing.id,
+          accessToken: existing.accessToken,
+        },
+      });
+      return;
+    }
+
+    // Create new channel
+    const channelName = 'channel-' + key.slice(0, 8);
+    const newChannel = await this.channelStore.create({
+      name: channelName,
+      serverUrl: url,
+      description: 'Quick-registered via /api/channel/quick-register',
+      status: 'registered',
+      secret: key,
+      accessToken: uuidv4(),
+      mode: mode ?? 'user',
+    });
+
+    this.options.logger?.info({
+      event: 'channel_quick_registered',
+      channelId: newChannel.id,
+      name: channelName,
+      ip,
+    });
+
+    res.status(201).json({
+      success: true,
+      data: {
+        channelId: newChannel.id,
+        accessToken: newChannel.accessToken,
       },
     });
   }
@@ -860,8 +988,9 @@ export class WebHubServer {
   async start(): Promise<void> {
     return new Promise((resolve) => {
       this.server = this.app.listen(this.options.port, () => {
-        // Attach WebSocket server to the same HTTP server at /api/webhub/ws
-        this.wsServer = new WebSocketServer({ server: this.server!, path: '/api/webhub/ws' });
+        // T011: Use noServer:true so the upgrade event is fully controlled here,
+        // preventing the ws library from rejecting /api/channel/ws with 400.
+        this.wsServer = new WebSocketServer({ noServer: true });
         this.wsServer.on('connection', async (ws: WebSocket, req: http.IncomingMessage) => {
           const url = new URL(req.url ?? '', `http://localhost:${this.options.port}`);
           const channelId = url.searchParams.get('channelId') ?? '';
@@ -895,6 +1024,24 @@ export class WebHubServer {
           port: this.options.port,
           message: 'WebHub HTTP server started',
         });
+
+        // T011 Plugin-Channel Realtime: Route HTTP Upgrade requests by pathname.
+        // Using a single upgrade listener avoids the ws library rejecting
+        // non-matching paths with 400 when path: option is used.
+        this.server!.on('upgrade', (req: http.IncomingMessage, socket, head) => {
+          const pathname = new URL(req.url ?? '', `http://localhost`).pathname;
+          if (pathname === '/api/channel/ws') {
+            pluginWsServer.handleUpgrade(req, socket as import('net').Socket, head);
+          } else if (pathname === '/api/webhub/ws') {
+            this.wsServer!.handleUpgrade(req, socket as import('net').Socket, head, (ws) => {
+              this.wsServer!.emit('connection', ws, req);
+            });
+          } else {
+            // Unknown upgrade path — reject
+            socket.destroy();
+          }
+        });
+
         resolve();
       });
     });
