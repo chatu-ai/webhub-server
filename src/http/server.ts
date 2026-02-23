@@ -361,6 +361,9 @@ export class WebHubServer {
         },
       });
 
+      // Also broadcast to frontend WS subscribers so other tabs/users see it
+      broadcaster.broadcast(channelId, { type: 'message', data: stored });
+
       res.json({
         success: true,
         data: { messageId: stored.id, deliveredAt: stored.createdAt },
