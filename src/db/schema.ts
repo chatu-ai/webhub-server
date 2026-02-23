@@ -150,6 +150,23 @@ async function initDatabase(): Promise<Database> {
     )
   `);
 
+  // T002 display-sender-session: session_commands table for async plugin command relay
+  db.run(`
+    CREATE TABLE IF NOT EXISTS session_commands (
+      id TEXT PRIMARY KEY NOT NULL,
+      channel_id TEXT NOT NULL,
+      sender_id TEXT NOT NULL,
+      command_type TEXT NOT NULL,
+      payload TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      error TEXT,
+      created_at INTEGER NOT NULL,
+      acked_at INTEGER
+    )
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_session_cmds_channel_status ON session_commands (channel_id, status, created_at)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_session_cmds_sender ON session_commands (channel_id, sender_id, status)`);
+
   // Save database
   const data = db.export();
   const buffer = Buffer.from(data);

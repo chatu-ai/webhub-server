@@ -8,6 +8,7 @@ import WebSocket, { WebSocketServer } from 'ws';
 import { ChannelStore } from '../store/channelStore';
 import { MessageRouter } from '../router/messageRouter';
 import { messageStore as dbMessageStore, channelStore as dbChannelStoreRaw, reactionStore, readReceiptStore, directoryStore } from '../db/index';
+import { sessionCommandStore } from '../db/sessionCommandStore';
 import { broadcaster } from '../ws/broadcaster';
 import { pluginWsServer } from '../ws/pluginWsServer';
 import { upload, handleUpload, handleUploadError } from './upload';
@@ -175,6 +176,15 @@ export class WebHubServer {
 
     // T021 Plugin-Channel SSE: mount SSE event-stream router
     this.app.use(sseRouter);
+
+    // T008-T010 display-sender-session: session reset & command relay
+    this.app.post('/api/webhub/channels/:channelId/sessions/reset', this.resetSession.bind(this));
+    this.app.get('/api/channel/commands', this.getPendingCommands.bind(this));
+    this.app.post('/api/channel/commands/:commandId/ack', this.ackCommand.bind(this));
+
+    // T017-T018 display-sender-session: session list & switch
+    this.app.get('/api/webhub/channels/:channelId/sessions', this.listSessions.bind(this));
+    this.app.post('/api/webhub/channels/:channelId/sessions/switch', this.switchSession.bind(this));
 
     // T011: register handleWebhook route (BUG-02 fix)
     this.app.post('/api/webhooks/:channelId', this.handleWebhook.bind(this));
@@ -1157,6 +1167,255 @@ export class WebHubServer {
     sseManager.broadcast(channel.id, 'done', { messageId, totalSeq, content: fullContent });
 
     res.status(200).json({ ok: true });
+  }
+
+  // ── T008 display-sender-session: POST /api/webhub/channels/:channelId/sessions/reset ──
+
+  private async resetSession(req: Request, res: Response): Promise<void> {
+    try {
+      const { channelId } = req.params;
+      const { senderId, reason } = req.body as { senderId?: string; reason?: string };
+
+      if (!senderId) {
+        res.status(400).json({ success: false, error: 'senderId is required', code: 'INVALID_REQUEST' });
+        return;
+      }
+
+      const channel = await this.channelStore.getById(channelId);
+      if (!channel) {
+        res.status(404).json({ success: false, error: 'Channel not found', code: 'CHANNEL_NOT_FOUND' });
+        return;
+      }
+
+      // Bearer token auth (same pattern as deleteMessage)
+      const providedToken = req.headers.authorization?.replace('Bearer ', '').trim() || '';
+      if (channel.accessToken && providedToken !== channel.accessToken) {
+        res.status(401).json({ success: false, error: 'Unauthorized', code: 'UNAUTHORIZED' });
+        return;
+      }
+
+      // 409 dedup: don't queue another reset if one is already pending for this sender
+      if (sessionCommandStore.hasPending(channelId, senderId)) {
+        res.status(409).json({ success: false, error: 'A session reset is already pending', code: 'CONFLICT' });
+        return;
+      }
+
+      const cmd = sessionCommandStore.enqueue(channelId, senderId, 'reset', reason ? { reason } : undefined);
+      this.options.logger?.info({ event: 'session_reset_queued', channelId, senderId, commandId: cmd.id });
+
+      res.status(202).json({ success: true, data: { commandId: cmd.id, status: 'pending' } });
+    } catch (err: unknown) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      res.status(500).json({ success: false, error: error.message, code: 'INTERNAL_ERROR' });
+    }
+  }
+
+  // ── T017 display-sender-session: GET /api/webhub/channels/:channelId/sessions ──
+
+  private async listSessions(req: Request, res: Response): Promise<void> {
+    try {
+      const { channelId } = req.params;
+      const senderId = req.query['senderId'] as string | undefined;
+
+      const channel = await this.channelStore.getById(channelId);
+      if (!channel) {
+        res.status(404).json({ success: false, error: 'Channel not found', code: 'CHANNEL_NOT_FOUND' });
+        return;
+      }
+
+      const providedToken = req.headers.authorization?.replace('Bearer ', '').trim() || '';
+      if (channel.accessToken && providedToken !== channel.accessToken) {
+        res.status(401).json({ success: false, error: 'Unauthorized', code: 'UNAUTHORIZED' });
+        return;
+      }
+
+      // Derive sessions from completed reset+switch commands as session boundaries
+      const allCmds = sessionCommandStore.listByChannel(channelId)
+        .filter(c => c.status === 'done' && (!senderId || c.senderId === senderId))
+        .sort((a, b) => a.createdAt - b.createdAt);
+
+      // Build session entries: each reset creates a new session period
+      const sessions: Array<{
+        sessionKey: string;
+        senderId: string;
+        createdAt: number;
+        lastActivityAt: number;
+        isCurrent: boolean;
+        label: string | null;
+      }> = [];
+
+      // Group by senderId to find the most recent session per sender
+      const senderMap = new Map<string, typeof allCmds>();
+      for (const cmd of allCmds) {
+        if (!senderMap.has(cmd.senderId)) senderMap.set(cmd.senderId, []);
+        senderMap.get(cmd.senderId)!.push(cmd);
+      }
+
+      for (const [sid, cmds] of senderMap) {
+        cmds.forEach((cmd, idx) => {
+          sessions.push({
+            sessionKey: `session-${cmd.id.slice(0, 8)}`,
+            senderId: sid,
+            createdAt: cmd.createdAt,
+            lastActivityAt: cmd.ackedAt ?? cmd.createdAt,
+            isCurrent: idx === cmds.length - 1,
+            label: cmd.commandType === 'switch' ? 'Switched' : `Session ${idx + 1}`,
+          });
+        });
+      }
+
+      res.json({ success: true, data: { sessions } });
+    } catch (err: unknown) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      res.status(500).json({ success: false, error: error.message, code: 'INTERNAL_ERROR' });
+    }
+  }
+
+  // ── T018 display-sender-session: POST /api/webhub/channels/:channelId/sessions/switch ──
+
+  private async switchSession(req: Request, res: Response): Promise<void> {
+    try {
+      const { channelId } = req.params;
+      const { senderId, targetSessionKey } = req.body as {
+        senderId?: string;
+        targetSessionKey?: string;
+      };
+
+      if (!senderId) {
+        res.status(400).json({ success: false, error: 'senderId is required', code: 'INVALID_REQUEST' });
+        return;
+      }
+      if (!targetSessionKey) {
+        res.status(400).json({ success: false, error: 'targetSessionKey is required', code: 'INVALID_REQUEST' });
+        return;
+      }
+
+      const channel = await this.channelStore.getById(channelId);
+      if (!channel) {
+        res.status(404).json({ success: false, error: 'Channel not found', code: 'CHANNEL_NOT_FOUND' });
+        return;
+      }
+
+      const providedToken = req.headers.authorization?.replace('Bearer ', '').trim() || '';
+      if (channel.accessToken && providedToken !== channel.accessToken) {
+        res.status(401).json({ success: false, error: 'Unauthorized', code: 'UNAUTHORIZED' });
+        return;
+      }
+
+      if (sessionCommandStore.hasPending(channelId, senderId)) {
+        res.status(409).json({ success: false, error: 'A session command is already pending', code: 'CONFLICT' });
+        return;
+      }
+
+      const cmd = sessionCommandStore.enqueue(channelId, senderId, 'switch', { targetSessionKey });
+      this.options.logger?.info({ event: 'session_switch_queued', channelId, senderId, targetSessionKey, commandId: cmd.id });
+
+      res.status(202).json({ success: true, data: { commandId: cmd.id, status: 'pending' } });
+    } catch (err: unknown) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      res.status(500).json({ success: false, error: error.message, code: 'INTERNAL_ERROR' });
+    }
+  }
+
+  // ── T009 display-sender-session: GET /api/channel/commands ───────────────
+
+  private async getPendingCommands(req: Request, res: Response): Promise<void> {
+    try {
+      const token = req.headers['x-channel-token'] as string;
+      const channelId = req.query['channelId'] as string;
+
+      if (!token) {
+        res.status(401).json({ success: false, error: 'Missing channel token', code: 'UNAUTHORIZED' });
+        return;
+      }
+      if (!channelId) {
+        res.status(400).json({ success: false, error: 'Missing channelId', code: 'INVALID_REQUEST' });
+        return;
+      }
+
+      const channel = await this.channelStore.getById(channelId);
+      if (!channel || channel.accessToken !== token) {
+        res.status(401).json({ success: false, error: 'Invalid token', code: 'UNAUTHORIZED' });
+        return;
+      }
+
+      const commands = sessionCommandStore.getPending(channelId);
+      res.json({
+        success: true,
+        data: {
+          commands: commands.map((c) => ({
+            id: c.id,
+            commandType: c.commandType,
+            senderId: c.senderId,
+            payload: c.payload ?? null,
+            createdAt: c.createdAt,
+          })),
+        },
+      });
+    } catch (err: unknown) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      res.status(500).json({ success: false, error: error.message, code: 'INTERNAL_ERROR' });
+    }
+  }
+
+  // ── T010 display-sender-session: POST /api/channel/commands/:commandId/ack ──
+
+  private async ackCommand(req: Request, res: Response): Promise<void> {
+    try {
+      const { commandId } = req.params;
+      const { success: ackSuccess, error: ackError, channelId: bodyChannelId } = req.body as {
+        success: boolean;
+        error?: string;
+        channelId?: string;
+      };
+
+      const token = req.headers['x-channel-token'] as string;
+      const channelId = (bodyChannelId || req.query['channelId']) as string;
+
+      if (!token) {
+        res.status(401).json({ success: false, error: 'Missing channel token', code: 'UNAUTHORIZED' });
+        return;
+      }
+
+      if (channelId) {
+        const channel = await this.channelStore.getById(channelId);
+        if (!channel || channel.accessToken !== token) {
+          res.status(401).json({ success: false, error: 'Invalid token', code: 'UNAUTHORIZED' });
+          return;
+        }
+      }
+
+      sessionCommandStore.ack(commandId, !!ackSuccess, ackError);
+
+      // On successful reset/switch: persist system message so frontend sees confirmation
+      const cmd = sessionCommandStore.getById(commandId);
+      if (ackSuccess && cmd) {
+        const msgChannelId = cmd.channelId;
+        const label = cmd.commandType === 'switch' ? 'Session switched' : 'New session started';
+        const systemMsg = dbMessageStore.create({
+          channelId: msgChannelId,
+          direction: 'outbound',
+          messageType: 'text',
+          content: label,
+          role: 'agent',
+          senderId: 'system',
+          status: 'delivered',
+          metadata: { isSystem: true, commandId, commandType: cmd.commandType },
+        });
+        broadcaster.broadcast(msgChannelId, { type: 'message', data: systemMsg });
+        this.options.logger?.info({
+          event: 'session_command_acked',
+          commandId,
+          commandType: cmd.commandType,
+          channelId: msgChannelId,
+        });
+      }
+
+      res.json({ success: true });
+    } catch (err: unknown) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      res.status(500).json({ success: false, error: error.message, code: 'INTERNAL_ERROR' });
+    }
   }
 
   async start(): Promise<void> {

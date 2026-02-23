@@ -172,3 +172,28 @@ export interface ErrorResponse {
   error: string;
   code?: string;
 }
+
+// Session Commands (display-sender-session feature)
+export type SessionCommandType = 'reset' | 'switch';
+export type SessionCommandStatus = 'pending' | 'processing' | 'done' | 'failed';
+
+export interface SessionCommand {
+  id: string;
+  channelId: string;
+  senderId: string;
+  commandType: SessionCommandType;
+  payload?: { targetSessionKey?: string; reason?: string } | null;
+  status: SessionCommandStatus;
+  error?: string | null;
+  createdAt: number;
+  ackedAt?: number | null;
+}
+
+export interface SessionEntry {
+  sessionKey: string;
+  senderId: string;
+  createdAt: number;
+  lastActivityAt: number;
+  isCurrent: boolean;
+  label?: string | null;
+}
