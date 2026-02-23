@@ -86,6 +86,22 @@ export class ChannelStore {
     return row?.count || 0;
   }
 
+  /** T006: Look up channel by unique plugin key. */
+  getByKey(key: string): Channel | null {
+    const row = db.prepare('SELECT * FROM channels WHERE key = ?').get(key) as Record<string, unknown> | undefined;
+    return row ? this.mapRow(row) : null;
+  }
+
+  /** T006: Update live plugin WS connection status (online / reconnecting / offline). */
+  updatePluginStatus(id: string, status: 'online' | 'reconnecting' | 'offline'): void {
+    db.prepare('UPDATE channels SET plugin_status = ?, updated_at = ? WHERE id = ?').run(status, new Date().toISOString(), id);
+  }
+
+  /** T026: Persist the unique key for a channel (called after create()). */
+  setKey(id: string, key: string): void {
+    db.prepare('UPDATE channels SET key = ?, updated_at = ? WHERE id = ?').run(key, new Date().toISOString(), id);
+  }
+
   private mapRow(row: Record<string, unknown>): Channel {
     return {
       id: row.id as string,
@@ -97,6 +113,10 @@ export class ChannelStore {
       accessToken: row.access_token as string,
       // Plugin-Channel Realtime: mode field (defaults to 'user' for legacy rows)
       mode: (row.mode as string) || 'user',
+      // T006: key field (may be null for legacy rows)
+      key: (row.key as string) || undefined,
+      // T006: plugin connection status
+      pluginStatus: ((row.plugin_status as string) || 'offline') as 'online' | 'reconnecting' | 'offline',
       config: JSON.parse((row.config as string) || '{}'),
       metrics: JSON.parse((row.metrics as string) || '{}') as ChannelMetrics,
       createdAt: new Date(row.created_at as string),

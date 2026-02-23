@@ -11,6 +11,8 @@ import { messageStore as dbMessageStore, channelStore as dbChannelStoreRaw, reac
 import { broadcaster } from '../ws/broadcaster';
 import { pluginWsServer } from '../ws/pluginWsServer';
 import { upload, handleUpload, handleUploadError } from './upload';
+import { sseManager } from './sseManager';
+import sseRouter from '../router/sseRouter';
 
 export interface WebHubServerOptions {
   port: number;
@@ -114,6 +116,8 @@ export class WebHubServer {
 
     // Channel Management
     this.app.post('/api/webhub/channels/apply', this.applyChannel.bind(this));
+    // T026: Simplified key+url channel registration (must precede /:id routes)
+    this.app.post('/api/webhub/channels', this.registerChannelByKey.bind(this));
     this.app.get('/api/webhub/channels', this.listChannels.bind(this));
     this.app.get('/api/webhub/channels/:id', this.getChannel.bind(this));
     this.app.get('/api/webhub/channels/:id/status', this.getChannelStatus.bind(this));
@@ -164,6 +168,13 @@ export class WebHubServer {
     this.app.post('/api/channel/messages', this.forwardToOpenClaw.bind(this));
     this.app.get('/api/channel/messages/pending', this.getPendingMessages.bind(this));
     this.app.post('/api/channel/messages/:id/ack', this.ackMessage.bind(this));
+
+    // T016 Plugin-Channel SSE: streaming chunk relay endpoints (plugin → API → SSE)
+    this.app.post('/api/channel/stream/chunk', this.handleStreamChunk.bind(this));
+    this.app.post('/api/channel/stream/done', this.handleStreamDone.bind(this));
+
+    // T021 Plugin-Channel SSE: mount SSE event-stream router
+    this.app.use(sseRouter);
 
     // T011: register handleWebhook route (BUG-02 fix)
     this.app.post('/api/webhooks/:channelId', this.handleWebhook.bind(this));
@@ -229,6 +240,65 @@ export class WebHubServer {
       const err = error instanceof Error ? error : new Error(String(error));
       this.options.logger?.error({ event: 'channel_apply_error', error: err.message });
       res.status(500).json({ success: false, error: err.message, code: 'CREATE_FAILED' });
+    }
+  }
+
+  /**
+   * T026: POST /api/webhub/channels — simplified key+URL channel registration.
+   * Accepts { key, url, mode? }; validates key format and URL; enforces key uniqueness.
+   * Returns 201 { channelId, key, accessToken } on success.
+   */
+  private async registerChannelByKey(req: Request, res: Response): Promise<void> {
+    try {
+      const { key, url, mode } = req.body as { key?: string; url?: string; mode?: string };
+
+      const keyRegex = /^[a-zA-Z0-9_-]{1,64}$/;
+      if (!key || !keyRegex.test(key)) {
+        res.status(400).json({ error: 'INVALID_KEY', message: 'key must match ^[a-zA-Z0-9_-]{1,64}$' });
+        return;
+      }
+
+      try {
+        const parsed = new URL(url ?? '');
+        if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('bad protocol');
+      } catch {
+        res.status(400).json({ error: 'INVALID_URL', message: 'url must be a valid http/https URL' });
+        return;
+      }
+
+      // Key uniqueness check via the raw db store (has getByKey() from T006)
+      const existing = dbChannelStoreRaw.getByKey(key);
+      if (existing) {
+        res.status(409).json({ error: 'KEY_ALREADY_EXISTS' });
+        return;
+      }
+
+      const accessToken = `wh_${uuidv4().replace(/-/g, '')}`;
+      const secret = `wh_secret_${uuidv4().replace(/-/g, '').substring(0, 16)}`;
+
+      // Use the DB store directly so getByKey() / setKey() operate on the same DB row.
+      const channel = dbChannelStoreRaw.create({
+        name: key,
+        webhubUrl: url!,
+        description: mode ?? 'user',
+        mode: mode ?? 'user',
+        status: 'pending',
+        secret,
+        accessToken,
+        config: {},
+        metrics: { totalMessages: 0, messagesToday: 0, connections: 0 },
+      });
+
+      // Persist key on the db channel row (T026/T006)
+      dbChannelStoreRaw.setKey(channel.id, key);
+
+      this.options.logger?.info({ event: 'channel_registered_by_key', channelId: channel.id, key });
+
+      res.status(201).json({ channelId: channel.id, key, accessToken });
+    } catch (error: unknown) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      this.options.logger?.error({ event: 'channel_register_key_error', error: err.message });
+      res.status(500).json({ error: 'INTERNAL_ERROR', message: err.message });
     }
   }
 
@@ -1004,6 +1074,89 @@ export class WebHubServer {
     const ts = Date.now();
     broadcaster.broadcast(channelId, { type: 'typing', data: { channelId, username, ts } });
     res.json({ success: true });
+  }
+
+  // ── T016: AI Streaming chunk relay ─────────────────────────────────────────
+  /** In-memory buffer: messageId → { channelId, chunks: Map<seq, delta> } */
+  private streamChunkBuffer: Map<string, { channelId: string; chunks: Map<number, string>; startedAt: number }> = new Map();
+
+  /** POST /api/channel/stream/chunk  — plugin sends a delta chunk for an AI reply */
+  private async handleStreamChunk(req: Request, res: Response): Promise<void> {
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.replace('Bearer ', '').trim();
+    if (!token) { res.status(401).json({ error: 'MISSING_TOKEN' }); return; }
+
+    const channel = await this.channelStore.getByAccessToken(token);
+    if (!channel) { res.status(401).json({ error: 'INVALID_TOKEN' }); return; }
+
+    const { messageId, seq, delta } = req.body as { messageId?: string; seq?: number; delta?: string };
+    if (!messageId || seq === undefined || delta === undefined) {
+      res.status(400).json({ error: 'MISSING_FIELDS', required: ['messageId', 'seq', 'delta'] });
+      return;
+    }
+
+    // Store in buffer
+    if (!this.streamChunkBuffer.has(messageId)) {
+      this.streamChunkBuffer.set(messageId, { channelId: channel.id, chunks: new Map(), startedAt: Date.now() });
+    }
+    const buf = this.streamChunkBuffer.get(messageId)!;
+    buf.chunks.set(seq, delta);
+
+    // Broadcast SSE event:chunk to frontend
+    const chunkPayload = { messageId, seq, delta };
+    sseManager.broadcast(channel.id, 'chunk', chunkPayload, messageId);
+
+    res.status(200).json({ ok: true });
+  }
+
+  /** POST /api/channel/stream/done  — plugin signals streaming completion */
+  private async handleStreamDone(req: Request, res: Response): Promise<void> {
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.replace('Bearer ', '').trim();
+    if (!token) { res.status(401).json({ error: 'MISSING_TOKEN' }); return; }
+
+    const channel = await this.channelStore.getByAccessToken(token);
+    if (!channel) { res.status(401).json({ error: 'INVALID_TOKEN' }); return; }
+
+    const { messageId, totalSeq } = req.body as { messageId?: string; totalSeq?: number };
+    if (!messageId || totalSeq === undefined) {
+      res.status(400).json({ error: 'MISSING_FIELDS', required: ['messageId', 'totalSeq'] });
+      return;
+    }
+
+    // Retrieve buffer and assemble full content
+    const buf = this.streamChunkBuffer.get(messageId);
+    let fullContent = '';
+    if (buf) {
+      const seqKeys = Array.from(buf.chunks.keys()).sort((a, b) => a - b);
+      fullContent = seqKeys.map((k) => buf.chunks.get(k)).join('');
+      this.streamChunkBuffer.delete(messageId);
+    }
+
+    // Persist the assembled AI message to DB
+    try {
+      dbMessageStore.create({
+        channelId: channel.id,
+        direction: 'inbound',
+        messageType: 'text',
+        contentType: 'text',
+        content: fullContent,
+        metadata: { streaming: true, sourceMessageId: messageId },
+        role: 'ai',
+        streamingState: 'complete',
+        status: 'delivered',
+      });
+    } catch (err) {
+      this.options.logger?.warn(
+        { event: 'stream_done_db_error', messageId, error: String(err) },
+        'Failed to persist streaming message',
+      );
+    }
+
+    // Broadcast SSE event:done — frontend uses this to finalise the streaming bubble
+    sseManager.broadcast(channel.id, 'done', { messageId, totalSeq, content: fullContent });
+
+    res.status(200).json({ ok: true });
   }
 
   async start(): Promise<void> {

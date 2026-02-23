@@ -90,6 +90,30 @@ async function initDatabase(): Promise<Database> {
   // Phase 11 T044: add role column to messages (idempotent via try/catch)
   try { db.run(`ALTER TABLE messages ADD COLUMN role TEXT DEFAULT 'visitor'`); } catch (_) { /* already exists */ }
 
+  // T002 Plugin-Channel SSE: add key + plugin_status to channels
+  try { db.run(`ALTER TABLE channels ADD COLUMN key TEXT`); } catch (_) { /* already exists */ }
+  try { db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_channels_key ON channels(key)`); } catch (_) { /* already exists */ }
+  try { db.run(`ALTER TABLE channels ADD COLUMN plugin_status TEXT DEFAULT 'offline'`); } catch (_) { /* already exists */ }
+
+  // T002 Plugin-Channel SSE: add content_type, streaming_state, payload to messages
+  try { db.run(`ALTER TABLE messages ADD COLUMN content_type TEXT DEFAULT 'text'`); } catch (_) { /* already exists */ }
+  try { db.run(`ALTER TABLE messages ADD COLUMN streaming_state TEXT`); } catch (_) { /* already exists */ }
+  try { db.run(`ALTER TABLE messages ADD COLUMN payload TEXT`); } catch (_) { /* already exists */ }
+
+  // T002 Plugin-Channel SSE: offline_queue table for API-side inbound message caching
+  db.run(`
+    CREATE TABLE IF NOT EXISTS offline_queue (
+      id TEXT PRIMARY KEY,
+      channel_id TEXT NOT NULL REFERENCES channels(id),
+      message_id TEXT NOT NULL UNIQUE,
+      payload TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      last_attempt_at INTEGER
+    )
+  `);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_offline_queue_channel ON offline_queue(channel_id)`);
+
   // P4: reactions table
   db.run(`
     CREATE TABLE IF NOT EXISTS reactions (

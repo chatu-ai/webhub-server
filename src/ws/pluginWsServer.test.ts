@@ -17,8 +17,9 @@ import WebSocket from 'ws';
 // ── Mocks (must be declared BEFORE jest.mock calls) ─────────────────────────
 
 const mockGetByAccessToken = jest.fn();
+const mockUpdatePluginStatus = jest.fn();
 jest.mock('../db/channelStore', () => ({
-  channelStore: { getByAccessToken: mockGetByAccessToken },
+  channelStore: { getByAccessToken: mockGetByAccessToken, updatePluginStatus: mockUpdatePluginStatus },
 }));
 
 const mockListPending = jest.fn<any[], [string?, number?]>(() => []);
@@ -251,6 +252,34 @@ describe('PluginWsServer', () => {
       await new Promise((r) => setTimeout(r, 20));
 
       expect(mockBroadcastChannelStatus).toHaveBeenCalledWith('ch-offline', 'reconnecting');
+    });
+  });
+
+  // ── updatePluginStatus (T009) ──────────────────────────────────────────────
+
+  describe('updatePluginStatus (T009)', () => {
+    it('calls updatePluginStatus("online") on connect', async () => {
+      mockGetByAccessToken.mockReturnValue({ id: 'ch-ps-online' });
+      const ws = connectClient(portFn(), { channelId: 'ch-ps-online', token: 'tok-ps' });
+      clients.push(ws);
+      await waitForOpen(ws);
+      await new Promise((r) => setTimeout(r, 20));
+
+      expect(mockUpdatePluginStatus).toHaveBeenCalledWith('ch-ps-online', 'online');
+      ws.close();
+    });
+
+    it('calls updatePluginStatus("reconnecting") on disconnect', async () => {
+      mockGetByAccessToken.mockReturnValue({ id: 'ch-ps-disc' });
+      const ws = connectClient(portFn(), { channelId: 'ch-ps-disc', token: 'tok-ps2' });
+      clients.push(ws);
+      await waitForOpen(ws);
+
+      ws.close();
+      await waitForClose(ws);
+      await new Promise((r) => setTimeout(r, 20));
+
+      expect(mockUpdatePluginStatus).toHaveBeenCalledWith('ch-ps-disc', 'reconnecting');
     });
   });
 });

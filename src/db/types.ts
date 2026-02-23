@@ -1,7 +1,43 @@
 // Channel-centric types (Channel = tenant unit)
 
+// T003 Plugin-Channel SSE: plugin connection status
+export type PluginStatus = 'online' | 'reconnecting' | 'offline';
+
+// T003 Plugin-Channel SSE: message content type (maps to DB column content_type)
+export type MessageContentType = 'text' | 'image' | 'file' | 'action' | 'unknown';
+
+// T003 Plugin-Channel SSE: streaming state for AI reply messages
+export type StreamingState = 'streaming' | 'complete' | 'truncated' | null;
+
+// T003 Plugin-Channel SSE: SSE event frame sent to frontend
+export interface SseEvent {
+  event: string;
+  data: unknown;
+  id?: number;
+}
+
+// T003 Plugin-Channel SSE: streaming chunk from plugin → API → frontend
+export interface StreamChunk {
+  messageId: string;
+  seq: number;
+  delta: string;
+}
+
+// T003 Plugin-Channel SSE: offline queue item (API-side inbound caching)
+export interface OfflineQueueItem {
+  id: string;
+  channelId: string;
+  messageId: string;
+  payload: string;        // JSON serialised message
+  createdAt: number;      // Unix ms
+  attemptCount: number;
+  lastAttemptAt?: number;
+}
+
 export interface Channel {
   id: string;
+  /** T003: global-unique plugin key (user-specified, 1-64 chars) */
+  key?: string;
   name: string;
   webhubUrl: string;  // WebHub Backend URL
   description?: string;
@@ -10,6 +46,8 @@ export interface Channel {
   accessToken: string;
   /** Plugin-Channel Realtime: connection mode, 'user' | 'group' (future) */
   mode: string;
+  /** T003: live plugin WebSocket connection status */
+  pluginStatus?: PluginStatus;
   config: Record<string, unknown>;
   metrics: ChannelMetrics;
   createdAt: Date;
@@ -56,7 +94,13 @@ export interface Message {
   channelId: string;
   direction: 'inbound' | 'outbound';
   messageType: 'text' | 'image' | 'audio' | 'video' | 'file' | 'system' | 'richCard' | 'poll';
+  /** T003: API-facing type name mapping to DB column content_type */
+  contentType?: MessageContentType;
   content: string;
+  /** T003: structured payload (image URL, file info, action name, etc.) */
+  payload?: Record<string, unknown> | null;
+  /** T003: streaming state for AI reply messages */
+  streamingState?: StreamingState;
   metadata: {
     attachments?: Attachment[];
     streaming?: boolean;

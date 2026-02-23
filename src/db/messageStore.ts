@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import db from './schema';
-import { Message } from './types';
+import { Message, MessageContentType, StreamingState } from './types';
 
 export class MessageStore {
   create(data: Omit<Message, 'id' | 'createdAt'>): Message {
@@ -8,13 +8,14 @@ export class MessageStore {
     const now = new Date().toISOString();
 
     db.prepare(`
-      INSERT INTO messages (id, channel_id, direction, message_type, content, metadata, sender_id, sender_name, target_id, reply_to, thread_id, role, status, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO messages (id, channel_id, direction, message_type, content_type, content, metadata, sender_id, sender_name, target_id, reply_to, thread_id, role, streaming_state, payload, status, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       data.channelId,
       data.direction,
       data.messageType,
+      data.contentType || data.messageType || 'text',
       data.content,
       JSON.stringify(data.metadata),
       data.senderId || null,
@@ -23,6 +24,8 @@ export class MessageStore {
       data.replyTo || null,
       data.threadId || null,
       data.role || 'visitor',
+      data.streamingState || null,
+      data.payload ? JSON.stringify(data.payload) : null,
       data.status,
       now
     );
@@ -128,15 +131,26 @@ export class MessageStore {
     db.prepare('DELETE FROM messages WHERE channel_id = ?').run(channelId);
   }
 
+  /** T007: Update streaming state for an in-progress AI reply. */
+  updateStreamingState(id: string, state: StreamingState, content?: string): void {
+    if (content !== undefined) {
+      db.prepare('UPDATE messages SET streaming_state = ?, content = ? WHERE id = ?').run(state, content, id);
+    } else {
+      db.prepare('UPDATE messages SET streaming_state = ? WHERE id = ?').run(state, id);
+    }
+  }
+
   private mapRow(row: Record<string, unknown>): Message {
     // Plugin-Channel Realtime: DB column is `message_type`, API field is `contentType`.
     // Both are kept in sync here for backward compat with existing code.
     const dbMessageType = row.message_type as string;
+    const dbContentType = (row.content_type as string | undefined) || dbMessageType;
     return {
       id: row.id as string,
       channelId: row.channel_id as string,
       direction: row.direction as 'inbound' | 'outbound',
       messageType: dbMessageType as Message['messageType'],
+      contentType: dbContentType as MessageContentType,
       content: row.content as string,
       metadata: JSON.parse((row.metadata as string) || '{}'),
       senderId: row.sender_id as string | undefined,
@@ -145,6 +159,8 @@ export class MessageStore {
       replyTo: row.reply_to as string | undefined,
       threadId: row.thread_id as string | undefined,
       role: (row.role as 'visitor' | 'agent' | 'ai' | undefined) ?? 'visitor',
+      streamingState: (row.streaming_state as StreamingState) ?? null,
+      payload: row.payload ? JSON.parse(row.payload as string) as Record<string, unknown> : null,
       status: row.status as Message['status'],
       createdAt: new Date(row.created_at as string),
     };

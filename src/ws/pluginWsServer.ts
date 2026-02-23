@@ -19,7 +19,9 @@ import WebSocket, { WebSocketServer } from 'ws';
 import { Logger } from 'pino';
 import { channelStore } from '../db/channelStore';
 import { queueStore } from '../db/queueStore';
+import { offlineQueueStore } from '../db/offlineQueueStore';
 import { broadcaster } from './broadcaster';
+import { sseManager } from '../http/sseManager';
 
 export interface PluginWsServerOptions {
   logger?: Logger;
@@ -142,6 +144,12 @@ export class PluginWsServer {
 
     // Broadcast online status to subscribed frontend clients
     broadcaster.broadcastChannelStatus(channelId, 'online');
+    // T009: Persist plugin connection status to DB
+    channelStore.updatePluginStatus(channelId, 'online');
+    // T021: Broadcast channel_status via SSE to frontend
+    const statusPayload = { channelId, status: 'online', timestamp: Date.now() };
+    sseManager.broadcast(channelId, 'channel_status', statusPayload);
+    sseManager.broadcastGlobal('channel_status', statusPayload);
 
     // Replay pending queue items to the plugin
     this.replayPendingQueue(channelId, ws).catch((err) => {
@@ -163,9 +171,21 @@ export class PluginWsServer {
 
       // Broadcast reconnecting immediately, then offline after timeout
       broadcaster.broadcastChannelStatus(channelId, 'reconnecting');
+      // T009: Persist reconnecting status to DB
+      channelStore.updatePluginStatus(channelId, 'reconnecting');
+      // T021: SSE broadcast
+      const reconnPayload = { channelId, status: 'reconnecting', timestamp: Date.now() };
+      sseManager.broadcast(channelId, 'channel_status', reconnPayload);
+      sseManager.broadcastGlobal('channel_status', reconnPayload);
 
       const timer = setTimeout(() => {
         broadcaster.broadcastChannelStatus(channelId, 'offline');
+        // T009: Persist offline status to DB
+        channelStore.updatePluginStatus(channelId, 'offline');
+        // T021: SSE broadcast for offline
+        const offlinePayload = { channelId, status: 'offline', timestamp: Date.now() };
+        sseManager.broadcast(channelId, 'channel_status', offlinePayload);
+        sseManager.broadcastGlobal('channel_status', offlinePayload);
         this.connections.delete(channelId);
       }, OFFLINE_DELAY_MS);
 
@@ -215,13 +235,19 @@ export class PluginWsServer {
    */
   private async replayPendingQueue(channelId: string, ws: WebSocket): Promise<void> {
     const items = queueStore.listPending(channelId);
-    if (items.length === 0) return;
+
+    // T015: Also replay offline_queue items (inbound frontend messages queued while plugin was offline)
+    const offlineItems = offlineQueueStore.listPending(channelId);
+
+    const totalCount = items.length + offlineItems.length;
+    if (totalCount === 0) return;
 
     this.logger?.info(
-      { event: 'plugin_ws_replay', channelId, count: items.length },
-      `Replaying ${items.length} pending queue items to plugin (channelId=${channelId})`,
+      { event: 'plugin_ws_replay', channelId, queueCount: items.length, offlineCount: offlineItems.length },
+      `Replaying ${items.length} queue + ${offlineItems.length} offline items to plugin (channelId=${channelId})`,
     );
 
+    // Replay message_queue items (outbound pipeline)
     for (const item of items) {
       if (ws.readyState !== WebSocket.OPEN) break;
 
@@ -246,6 +272,39 @@ export class PluginWsServer {
           queueStore.updateStatus(item.id, 'failed', String(err));
         } else {
           queueStore.updateStatus(item.id, 'processing');
+        }
+      });
+    }
+
+    // T015: Replay offline_queue items (inbound messages from frontend while plugin was offline)
+    for (const oItem of offlineItems) {
+      if (ws.readyState !== WebSocket.OPEN) break;
+      offlineQueueStore.incrementAttempt(oItem.id);
+
+      let parsedPayload: unknown;
+      try {
+        parsedPayload = JSON.parse(oItem.payload);
+      } catch {
+        parsedPayload = oItem.payload;
+      }
+
+      const frame = {
+        type: 'message',
+        channelId,
+        messageId: oItem.messageId,
+        timestamp: Date.now(),
+        payload: parsedPayload,
+      };
+
+      ws.send(JSON.stringify(frame), (err) => {
+        if (err) {
+          this.logger?.warn(
+            { event: 'plugin_ws_offline_replay_error', channelId, itemId: oItem.id, error: String(err) },
+            `Failed to replay offline item ${oItem.id} (channelId=${channelId})`,
+          );
+        } else {
+          // Delete on successful delivery
+          offlineQueueStore.delete(oItem.id);
         }
       });
     }
