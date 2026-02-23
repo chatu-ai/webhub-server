@@ -339,11 +339,27 @@ export class WebHubServer {
         metadata: { target, media: metadata?.media, replyTo: metadata?.replyTo, ...metadata },
         senderId: 'webhub',
         targetId: target?.id,
+        role: 'agent',
         status: 'sent',
       });
 
       dbChannelStoreRaw.incrementMetrics(channelId);
       this.options.logger?.info({ event: 'message_sent', channelId, messageId: stored.id });
+
+      // Phase 11 T046: push agent message down the plugin WS so OpenClaw sees it
+      pluginWsServer.pushToChannel(channelId, {
+        type: 'message',
+        channelId,
+        timestamp: Date.now(),
+        payload: {
+          id: stored.id,
+          role: 'agent',
+          content: { text: stored.content },
+          sender: { id: 'webhub', displayName: 'Agent' },
+          timestamp: Date.now(),
+          metadata: stored.metadata,
+        },
+      });
 
       res.json({
         success: true,
@@ -379,6 +395,7 @@ export class WebHubServer {
         senderName: m.senderName,
         targetId: m.targetId,
         replyTo: m.replyTo,
+        role: m.role ?? 'visitor',       // Phase 11 T046: role field
         status: m.status,
         createdAt: m.createdAt,
       })),
@@ -684,6 +701,7 @@ export class WebHubServer {
         content: body.content?.text || '',
         metadata: { target: body.target, media: body.media, replyTo: body.replyTo, ...(body.metadata ?? {}) },
         targetId: body.target?.id,
+        role: (body.role as 'visitor' | 'agent' | 'ai' | undefined) ?? 'ai', // Phase 11 T047
         status: 'sent',
       });
 

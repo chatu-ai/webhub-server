@@ -8,8 +8,8 @@ export class ChannelStore {
     const now = new Date().toISOString();
 
     db.prepare(`
-      INSERT INTO channels (id, name, webhub_url, description, status, secret, access_token, config, metrics, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO channels (id, name, webhub_url, description, status, secret, access_token, config, metrics, mode, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       data.name,
@@ -20,6 +20,7 @@ export class ChannelStore {
       data.accessToken,
       JSON.stringify(data.config),
       JSON.stringify(data.metrics),
+      data.mode || 'user',
       now,
       now
     );
@@ -94,6 +95,8 @@ export class ChannelStore {
       status: row.status as ChannelStatus,
       secret: row.secret as string,
       accessToken: row.access_token as string,
+      // Plugin-Channel Realtime: mode field (defaults to 'user' for legacy rows)
+      mode: (row.mode as string) || 'user',
       config: JSON.parse((row.config as string) || '{}'),
       metrics: JSON.parse((row.metrics as string) || '{}') as ChannelMetrics,
       createdAt: new Date(row.created_at as string),

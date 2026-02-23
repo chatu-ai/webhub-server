@@ -8,8 +8,8 @@ export class MessageStore {
     const now = new Date().toISOString();
 
     db.prepare(`
-      INSERT INTO messages (id, channel_id, direction, message_type, content, metadata, sender_id, sender_name, target_id, reply_to, thread_id, status, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO messages (id, channel_id, direction, message_type, content, metadata, sender_id, sender_name, target_id, reply_to, thread_id, role, status, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       data.channelId,
@@ -22,6 +22,7 @@ export class MessageStore {
       data.targetId || null,
       data.replyTo || null,
       data.threadId || null,
+      data.role || 'visitor',
       data.status,
       now
     );
@@ -128,11 +129,14 @@ export class MessageStore {
   }
 
   private mapRow(row: Record<string, unknown>): Message {
+    // Plugin-Channel Realtime: DB column is `message_type`, API field is `contentType`.
+    // Both are kept in sync here for backward compat with existing code.
+    const dbMessageType = row.message_type as string;
     return {
       id: row.id as string,
       channelId: row.channel_id as string,
       direction: row.direction as 'inbound' | 'outbound',
-      messageType: row.message_type as Message['messageType'],
+      messageType: dbMessageType as Message['messageType'],
       content: row.content as string,
       metadata: JSON.parse((row.metadata as string) || '{}'),
       senderId: row.sender_id as string | undefined,
@@ -140,6 +144,7 @@ export class MessageStore {
       targetId: row.target_id as string | undefined,
       replyTo: row.reply_to as string | undefined,
       threadId: row.thread_id as string | undefined,
+      role: (row.role as 'visitor' | 'agent' | 'ai' | undefined) ?? 'visitor',
       status: row.status as Message['status'],
       createdAt: new Date(row.created_at as string),
     };

@@ -85,6 +85,11 @@ async function initDatabase(): Promise<Database> {
   // P4: add thread_id column to messages (idempotent via try/catch)
   try { db.run(`ALTER TABLE messages ADD COLUMN thread_id TEXT`); } catch (_) { /* already exists */ }
 
+  // Plugin-Channel Realtime: add mode column to channels (idempotent via try/catch)
+  try { db.run(`ALTER TABLE channels ADD COLUMN mode TEXT DEFAULT 'user'`); } catch (_) { /* already exists */ }
+  // Phase 11 T044: add role column to messages (idempotent via try/catch)
+  try { db.run(`ALTER TABLE messages ADD COLUMN role TEXT DEFAULT 'visitor'`); } catch (_) { /* already exists */ }
+
   // P4: reactions table
   db.run(`
     CREATE TABLE IF NOT EXISTS reactions (

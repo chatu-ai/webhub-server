@@ -54,6 +54,31 @@ export class WebSocketBroadcaster {
   clientCount(channelId: string): number {
     return this.subscribers.get(channelId)?.size ?? 0;
   }
+
+  /**
+   * T017 Plugin-Channel Realtime: Broadcast a channel_status event to all
+   * frontend WebSocket clients subscribed to channelId.
+   *
+   * @param channelId   - The channel whose plugin status changed
+   * @param status      - 'online' | 'reconnecting' | 'offline'
+   * @param pluginVersion - Optional plugin semver string
+   */
+  broadcastChannelStatus(
+    channelId: string,
+    status: 'online' | 'reconnecting' | 'offline',
+    pluginVersion?: string,
+  ): void {
+    const payload: Record<string, unknown> = {
+      type: 'channel_status',
+      channelId,
+      status,
+      timestamp: Date.now(),
+    };
+    if (pluginVersion !== undefined) {
+      payload.pluginVersion = pluginVersion;
+    }
+    this.broadcast(channelId, payload);
+  }
 }
 
 export const broadcaster = new WebSocketBroadcaster();

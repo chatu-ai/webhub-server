@@ -519,4 +519,69 @@ describe('WebHubServer', () => {
       expect('pluginVersion' in resp.body.data).toBe(true);
     });
   });
+
+  /** T036: POST /api/channel/quick-register */
+  describe('POST /api/channel/quick-register', () => {
+    it('201: creates a new channel when key+url are valid', async () => {
+      const resp = await request(app)
+        .post('/api/channel/quick-register')
+        .send({ key: 'test-key-001', url: 'http://localhost:3000' });
+
+      expect(resp.status).toBe(201);
+      expect(resp.body.success).toBe(true);
+      expect(typeof resp.body.data.channelId).toBe('string');
+      expect(typeof resp.body.data.accessToken).toBe('string');
+    });
+
+    it('200: idempotent — same key+url returns existing channel', async () => {
+      await request(app)
+        .post('/api/channel/quick-register')
+        .send({ key: 'idem-key', url: 'http://localhost:3000' });
+
+      const resp = await request(app)
+        .post('/api/channel/quick-register')
+        .send({ key: 'idem-key', url: 'http://localhost:3000' });
+
+      expect(resp.status).toBe(200);
+      expect(resp.body.success).toBe(true);
+    });
+
+    it('409: same key but different url', async () => {
+      await request(app)
+        .post('/api/channel/quick-register')
+        .send({ key: 'conflict-key', url: 'http://server-a.example.com' });
+
+      const resp = await request(app)
+        .post('/api/channel/quick-register')
+        .send({ key: 'conflict-key', url: 'http://server-b.example.com' });
+
+      expect(resp.status).toBe(409);
+      expect(resp.body.success).toBe(false);
+    });
+
+    it('400: missing key', async () => {
+      const resp = await request(app)
+        .post('/api/channel/quick-register')
+        .send({ url: 'http://localhost:3000' });
+
+      expect(resp.status).toBe(400);
+    });
+
+    it('400: missing url', async () => {
+      const resp = await request(app)
+        .post('/api/channel/quick-register')
+        .send({ key: 'some-key' });
+
+      expect(resp.status).toBe(400);
+    });
+
+    it('422: invalid url format', async () => {
+      const resp = await request(app)
+        .post('/api/channel/quick-register')
+        .send({ key: 'bad-url-key', url: 'not-a-url' });
+
+      expect(resp.status).toBe(422);
+      expect(resp.body.success).toBe(false);
+    });
+  });
 });

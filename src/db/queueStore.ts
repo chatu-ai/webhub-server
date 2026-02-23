@@ -1,11 +1,40 @@
 import { v4 as uuidv4 } from 'uuid';
 import db from './schema';
 import { MessageQueueItem } from './types';
+import { getLogger } from '../utils/logger';
+
+/** T014: Maximum number of pending queue items per channel before eviction. */
+const QUEUE_CAPACITY = parseInt(process.env.QUEUE_CAPACITY ?? '1000', 10);
 
 export class QueueStore {
   create(data: Omit<MessageQueueItem, 'id' | 'createdAt'>): MessageQueueItem {
     const id = uuidv4();
     const now = new Date().toISOString();
+
+    // T014 Plugin-Channel Realtime: Enforce capacity limit per channel.
+    // Count pending rows and evict the oldest if at limit.
+    const countRow = db.prepare(
+      `SELECT COUNT(*) as cnt FROM message_queue WHERE status = 'pending' AND channel_id = ?`,
+    ).get(data.channelId) as { cnt: number } | undefined;
+
+    if ((countRow?.cnt ?? 0) >= QUEUE_CAPACITY) {
+      const oldestRow = db.prepare(
+        `SELECT id FROM message_queue WHERE status = 'pending' AND channel_id = ? ORDER BY created_at ASC LIMIT 1`,
+      ).get(data.channelId) as { id: string } | undefined;
+
+      if (oldestRow) {
+        db.prepare('DELETE FROM message_queue WHERE id = ?').run(oldestRow.id);
+        try {
+          getLogger().warn({
+            event: 'queue_capacity_exceeded',
+            channelId: data.channelId,
+            dropped_message_id: oldestRow.id,
+          });
+        } catch {
+          // logger not yet initialized (e.g., in tests) — safe to skip
+        }
+      }
+    }
 
     db.prepare(`
       INSERT INTO message_queue (id, channel_id, message_id, message_type, content, priority, retry_count, max_retries, status, scheduled_at, created_at)

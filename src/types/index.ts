@@ -1,3 +1,18 @@
+// Plugin-Channel Realtime: MessageType union
+export type MessageType = 'text' | 'image' | 'file' | 'action' | 'unknown';
+
+// Plugin-Channel Realtime: ConnectionStatusEvent pushed to frontend WS
+export interface ConnectionStatusEvent {
+  type: 'channel_status';
+  channelId: string;
+  status: 'online' | 'reconnecting' | 'offline';
+  pluginVersion?: string;
+  timestamp: number;
+}
+
+// Plugin-Channel Realtime: plugin connection status
+export type PluginConnectionStatus = 'online' | 'reconnecting' | 'offline';
+
 // Channel Types
 export interface Channel {
   id: string;
@@ -7,6 +22,7 @@ export interface Channel {
   secret: string;
   accessToken: string;
   description?: string;
+  mode?: string;
   createdAt: Date;
   updatedAt: Date;
   lastHeartbeat?: Date;

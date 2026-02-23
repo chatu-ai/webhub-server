@@ -8,6 +8,8 @@ export interface Channel {
   status: ChannelStatus;
   secret: string;
   accessToken: string;
+  /** Plugin-Channel Realtime: connection mode, 'user' | 'group' (future) */
+  mode: string;
   config: Record<string, unknown>;
   metrics: ChannelMetrics;
   createdAt: Date;
@@ -67,6 +69,8 @@ export interface Message {
   targetId?: string;
   replyTo?: string;
   threadId?: string;
+  /** Phase 11 T044: role of the message author — visitor (end user), agent (human operator), ai (bot) */
+  role?: 'visitor' | 'agent' | 'ai';
   status: 'pending' | 'sent' | 'delivered' | 'read' | 'failed' | 'deleted';
   createdAt: Date;
 }
@@ -105,13 +109,16 @@ export type BroadcastEvent =
   | { type: 'reaction_added'; data: Reaction }
   | { type: 'reaction_removed'; data: Reaction }
   | { type: 'typing'; data: { channelId: string; username: string; ts: number } }
-  | { type: 'read'; data: { messageId: string; userId: string; ts: number } };
+  | { type: 'read'; data: { messageId: string; userId: string; ts: number } }
+  // Plugin-Channel Realtime: plugin connection status event
+  | { type: 'channel_status'; channelId: string; status: 'online' | 'reconnecting' | 'offline'; pluginVersion?: string; timestamp: number };
 
 export interface MessageQueueItem {
   id: string;
   channelId: string;
   messageId: string;
-  messageType: 'text' | 'image' | 'audio' | 'video' | 'file';
+  /** Plugin-Channel Realtime: extended to include action/unknown (DB col: message_type) */
+  messageType: 'text' | 'image' | 'audio' | 'video' | 'file' | 'action' | 'unknown';
   content: string;
   priority: number;
   retryCount: number;

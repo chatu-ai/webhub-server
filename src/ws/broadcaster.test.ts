@@ -162,4 +162,80 @@ describe('WebSocketBroadcaster', () => {
       expect(broadcaster.clientCount('chan-1')).toBe(0);
     });
   });
+
+  // ─── T035: broadcastChannelStatus ──────────────────────────────────────────
+
+  describe('broadcastChannelStatus', () => {
+    it('broadcasts online status to subscribers of the given channel', () => {
+      const ws = mockWs(WebSocket.OPEN);
+      broadcaster.subscribe('chan-1', ws);
+
+      broadcaster.broadcastChannelStatus('chan-1', 'online');
+
+      expect(ws.send).toHaveBeenCalledTimes(1);
+      const payload = JSON.parse((ws.send as jest.Mock).mock.calls[0][0]);
+      expect(payload.type).toBe('channel_status');
+      expect(payload.channelId).toBe('chan-1');
+      expect(payload.status).toBe('online');
+      expect(typeof payload.timestamp).toBe('number');
+    });
+
+    it('broadcasts reconnecting status correctly', () => {
+      const ws = mockWs(WebSocket.OPEN);
+      broadcaster.subscribe('ch-x', ws);
+
+      broadcaster.broadcastChannelStatus('ch-x', 'reconnecting');
+
+      const payload = JSON.parse((ws.send as jest.Mock).mock.calls[0][0]);
+      expect(payload.status).toBe('reconnecting');
+    });
+
+    it('broadcasts offline status correctly', () => {
+      const ws = mockWs(WebSocket.OPEN);
+      broadcaster.subscribe('ch-y', ws);
+
+      broadcaster.broadcastChannelStatus('ch-y', 'offline');
+
+      const payload = JSON.parse((ws.send as jest.Mock).mock.calls[0][0]);
+      expect(payload.status).toBe('offline');
+    });
+
+    it('includes pluginVersion when provided', () => {
+      const ws = mockWs(WebSocket.OPEN);
+      broadcaster.subscribe('chan-v', ws);
+
+      broadcaster.broadcastChannelStatus('chan-v', 'online', '1.2.3');
+
+      const payload = JSON.parse((ws.send as jest.Mock).mock.calls[0][0]);
+      expect(payload.pluginVersion).toBe('1.2.3');
+    });
+
+    it('omits pluginVersion when not provided', () => {
+      const ws = mockWs(WebSocket.OPEN);
+      broadcaster.subscribe('chan-nv', ws);
+
+      broadcaster.broadcastChannelStatus('chan-nv', 'online');
+
+      const payload = JSON.parse((ws.send as jest.Mock).mock.calls[0][0]);
+      expect(payload.pluginVersion).toBeUndefined();
+    });
+
+    it('does not send to subscribers of other channels', () => {
+      const wsA = mockWs(WebSocket.OPEN);
+      const wsB = mockWs(WebSocket.OPEN);
+      broadcaster.subscribe('chan-a', wsA);
+      broadcaster.subscribe('chan-b', wsB);
+
+      broadcaster.broadcastChannelStatus('chan-a', 'online');
+
+      expect(wsA.send).toHaveBeenCalledTimes(1);
+      expect(wsB.send).not.toHaveBeenCalled();
+    });
+
+    it('does not throw when there are no subscribers', () => {
+      expect(() =>
+        broadcaster.broadcastChannelStatus('empty-ch', 'offline')
+      ).not.toThrow();
+    });
+  });
 });

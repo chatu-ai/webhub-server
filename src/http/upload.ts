@@ -2,7 +2,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
-import { Request, Response } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import { getLogger } from '../utils/logger';
 
 const logger = getLogger();
@@ -24,8 +24,17 @@ export const upload = multer({
       cb(null, uniqueName);
     },
   }),
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB
+  limits: { fileSize: 10 * 1024 * 1024 }, // T027: 10 MB limit
 });
+
+/** T027: Handle multer FILE_TOO_LARGE error and return 413. */
+export function handleUploadError(err: any, _req: Request, res: Response, next: NextFunction): void {
+  if (err && err.code === 'LIMIT_FILE_SIZE') {
+    res.status(413).json({ success: false, error: 'FILE_TOO_LARGE', maxBytes: 10 * 1024 * 1024 });
+    return;
+  }
+  next(err);
+}
 
 export function handleUpload(req: Request, res: Response): void {
   const file = req.file;
