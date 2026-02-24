@@ -17,6 +17,8 @@ import sseRouter from '../router/sseRouter';
 import localFileRouter from './localFileRouter';
 import { transformLocalPaths } from '../utils/contentTransformer';
 import { makeCrossChannelHandler } from './crossChannelHandler';
+import authRouter from './authRouter';
+import { authMiddleware } from '../middleware/authMiddleware';
 
 export interface WebHubServerOptions {
   port: number;
@@ -117,6 +119,12 @@ export class WebHubServer {
     this.app.get('/health', (req: Request, res: Response) => {
       res.json({ status: 'ok', timestamp: new Date().toISOString() });
     });
+
+    // Auth routes (public — must be mounted BEFORE the authMiddleware layer)
+    this.app.use('/api/webhub/auth', authRouter);
+
+    // Protect all /api/webhub/* routes (except /auth/* which are already handled above)
+    this.app.use('/api/webhub', authMiddleware);
 
     // Channel Management
     this.app.post('/api/webhub/channels/apply', this.applyChannel.bind(this));
@@ -242,6 +250,9 @@ export class WebHubServer {
 
       this.options.logger?.info({ event: 'channel_applied', channelId: channel.id, name: serverName });
 
+      // T032: Notify all SSE clients that the channel list changed
+      sseManager.broadcastChannelListChanged('created', channel.id);
+
       const registerCommand = `/webhub register ${channel.id} ${secret}`;
 
       res.json({
@@ -312,6 +323,9 @@ export class WebHubServer {
       dbChannelStoreRaw.setKey(channel.id, key);
 
       this.options.logger?.info({ event: 'channel_registered_by_key', channelId: channel.id, key });
+
+      // T032: Notify all SSE clients that the channel list changed
+      sseManager.broadcastChannelListChanged('created', channel.id);
 
       res.status(201).json({ channelId: channel.id, key, accessToken });
     } catch (error: unknown) {
@@ -390,6 +404,8 @@ export class WebHubServer {
       res.status(404).json({ success: false, error: 'Channel not found', code: 'CHANNEL_NOT_FOUND' });
       return;
     }
+    // T032: Notify all SSE clients that the channel list changed
+    sseManager.broadcastChannelListChanged('deleted', id);
     res.json({ success: true });
   }
 
@@ -633,6 +649,9 @@ export class WebHubServer {
       ip,
     });
 
+    // T032: Notify all SSE clients
+    sseManager.broadcastChannelListChanged('created', newChannel.id);
+
     res.status(201).json({
       success: true,
       data: {
@@ -792,6 +811,25 @@ export class WebHubServer {
 
       // Persist message to database (T009: transform local file paths to webhub URLs)
       const transformedContent = transformLocalPaths(body.content?.text || '', channelId);
+
+      // Dedup: if a dedupId is present and a message with the same dedupId was
+      // already stored via the relay path, skip this write.
+      // dedupId is the OpenClaw internal msg.id set by the plugin's before_message_write hook.
+      const dedupId = body.metadata?.dedupId as string | undefined;
+      if (dedupId) {
+        const dedupNow = new Date();
+        const dedupCutoff = new Date(dedupNow.getTime() - 30_000);
+        const recentMsgs = dbMessageStore.listByDateRange(channelId, dedupCutoff, dedupNow, 20);
+        const alreadyStored = recentMsgs.some(
+          (m) => (m.metadata as Record<string, unknown>)?.dedupId === dedupId,
+        );
+        if (alreadyStored) {
+          this.options.logger?.info({ event: 'message_dedup_skip', channelId, msgId, dedupId });
+          res.json({ success: true, messageId: msgId, deliveredAt: dedupNow.toISOString() });
+          return;
+        }
+      }
+
       const stored = dbMessageStore.create({
         channelId,
         direction: 'inbound',

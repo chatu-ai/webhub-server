@@ -175,6 +175,17 @@ export class SseManager {
     }
   }
 
+  /**
+   * T031 (US10): Broadcast a channel list change event to ALL connections.
+   * Triggered when a channel is created, updated, or deleted.
+   */
+  broadcastChannelListChanged(
+    action: 'created' | 'deleted' | 'updated',
+    channelId: string,
+  ): void {
+    this.broadcastGlobal('channel_list_changed', { action, channelId });
+  }
+
   /** Number of active connections (for health checks / tests). */
   connectionCount(channelId?: string): number {
     if (channelId) return this.connections.get(channelId)?.size ?? 0;

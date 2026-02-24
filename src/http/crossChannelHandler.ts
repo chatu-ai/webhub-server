@@ -64,6 +64,24 @@ export function makeCrossChannelHandler(channelStore: ChannelStore, logger?: Log
         return;
       }
 
+      // Dedup: if the same OpenClaw message ID (dedupId) was already stored via
+      // the direct deliverOutbound path, skip this relay write entirely.
+      // dedupId is the OpenClaw internal msg.id passed from before_message_write.
+      const dedupId = extraMeta?.dedupId as string | undefined;
+      if (dedupId) {
+        const dedupNow = new Date();
+        const dedupCutoff = new Date(dedupNow.getTime() - 30_000);
+        const recentMessages = dbMessageStore.listByDateRange(channel.id, dedupCutoff, dedupNow, 20);
+        const alreadyStored = recentMessages.some(
+          (m) => (m.metadata as Record<string, unknown>)?.dedupId === dedupId,
+        );
+        if (alreadyStored) {
+          logger?.info({ event: 'cross_channel_dedup_skip', channelId: channel.id, sourceChannel, direction, dedupId });
+          res.status(200).json({ id: 'dedup', channelId: channel.id, createdAt: dedupNow.toISOString() });
+          return;
+        }
+      }
+
       // Persist message to messages table with metadata.sourceChannel marker
       const stored = dbMessageStore.create({
         channelId: channel.id,
