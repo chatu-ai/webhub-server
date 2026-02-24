@@ -584,4 +584,125 @@ describe('WebHubServer', () => {
       expect(resp.body.success).toBe(false);
     });
   });
+
+  // ── T009: POST /api/channel/cross-channel-messages (US3) ──────────────────
+
+  describe('POST /api/channel/cross-channel-messages (T009 US3)', () => {
+    const BASE_PAYLOAD = {
+      sourceChannel: 'tui',
+      direction: 'inbound',
+      senderName: 'OpenClaw',
+      content: '## Hello\n\nThis is a **markdown** reply.',
+      sessionKey: 'tui-session-001',
+    };
+
+    async function setupChannel(suffix: string) {
+      return channelStore.create({
+        name: `TestChannel-${suffix}`,
+        serverUrl: 'https://test.example.com',
+        status: 'connected',
+        secret: `secret-${suffix}`,
+        accessToken: `token-cc-${suffix}`,
+      });
+    }
+
+    it('201: stores and returns message id on valid request', async () => {
+      const { messageStore } = await import('../db/messageStore');
+      const channel = await setupChannel('a');
+
+      const resp = await request(app)
+        .post('/api/channel/cross-channel-messages')
+        .set('X-Access-Token', channel.accessToken)
+        .send({ ...BASE_PAYLOAD, sessionKey: 'tui-001' });
+
+      expect(resp.status).toBe(201);
+      expect(resp.body.id).toBeDefined();
+      expect(resp.body.channelId).toBe(channel.id);
+      expect(resp.body.createdAt).toBeDefined();
+
+      // Verify persisted with correct metadata
+      const stored = messageStore.getById(resp.body.id);
+      expect(stored).toBeDefined();
+      expect(stored!.metadata.sourceChannel).toBe('tui');
+      expect(stored!.direction).toBe('inbound');
+      expect(stored!.senderName).toBe('OpenClaw');
+    });
+
+    it('401: missing X-Access-Token returns 401', async () => {
+      const resp = await request(app)
+        .post('/api/channel/cross-channel-messages')
+        .send(BASE_PAYLOAD);
+
+      expect(resp.status).toBe(401);
+      expect(resp.body.error).toMatch(/Missing/i);
+    });
+
+    it('401: invalid token returns 401', async () => {
+      const resp = await request(app)
+        .post('/api/channel/cross-channel-messages')
+        .set('X-Access-Token', 'totally-invalid-token')
+        .send(BASE_PAYLOAD);
+
+      expect(resp.status).toBe(401);
+    });
+
+    it('400: invalid sourceChannel format (uppercase) returns 400', async () => {
+      const channel = await setupChannel('b');
+
+      const resp = await request(app)
+        .post('/api/channel/cross-channel-messages')
+        .set('X-Access-Token', channel.accessToken)
+        .send({ ...BASE_PAYLOAD, sourceChannel: 'INVALID_UPPER' });
+
+      expect(resp.status).toBe(400);
+      expect(resp.body.error).toMatch(/sourceChannel/i);
+    });
+
+    it('400: missing required fields returns 400', async () => {
+      const channel = await setupChannel('c');
+
+      const resp = await request(app)
+        .post('/api/channel/cross-channel-messages')
+        .set('X-Access-Token', channel.accessToken)
+        .send({ sourceChannel: 'tui' }); // missing direction, senderName, content, sessionKey
+
+      expect(resp.status).toBe(400);
+      expect(resp.body.error).toMatch(/Missing required fields/i);
+    });
+
+    it('409: sourceChannel equals channel id returns 409', async () => {
+      const channel = await setupChannel('d');
+
+      const resp = await request(app)
+        .post('/api/channel/cross-channel-messages')
+        .set('X-Access-Token', channel.accessToken)
+        .send({ ...BASE_PAYLOAD, sourceChannel: channel.id });
+
+      expect(resp.status).toBe(409);
+      expect(resp.body.error).toMatch(/relay loop/i);
+    });
+
+    it('stores outbound (user) cross-channel messages correctly', async () => {
+      const { messageStore } = await import('../db/messageStore');
+      const channel = await setupChannel('e');
+
+      const resp = await request(app)
+        .post('/api/channel/cross-channel-messages')
+        .set('X-Access-Token', channel.accessToken)
+        .send({
+          sourceChannel: 'whatsapp',
+          direction: 'outbound',
+          senderName: 'whatsapp',
+          content: '请帮我解释 Vue 响应式原理',
+          sessionKey: 'wa-session-001',
+        });
+
+      expect(resp.status).toBe(201);
+      const stored = messageStore.getById(resp.body.id);
+      expect(stored!.metadata.sourceChannel).toBe('whatsapp');
+      expect(stored!.direction).toBe('outbound');
+      expect(stored!.role).toBe('visitor');
+    });
+  });
 });
+

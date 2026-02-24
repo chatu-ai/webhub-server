@@ -16,6 +16,7 @@ import { sseManager } from './sseManager';
 import sseRouter from '../router/sseRouter';
 import localFileRouter from './localFileRouter';
 import { transformLocalPaths } from '../utils/contentTransformer';
+import { makeCrossChannelHandler } from './crossChannelHandler';
 
 export interface WebHubServerOptions {
   port: number;
@@ -175,6 +176,9 @@ export class WebHubServer {
     // T016 Plugin-Channel SSE: streaming chunk relay endpoints (plugin → API → SSE)
     this.app.post('/api/channel/stream/chunk', this.handleStreamChunk.bind(this));
     this.app.post('/api/channel/stream/done', this.handleStreamDone.bind(this));
+
+    // US3: Cross-channel relay (TUI, WhatsApp, Telegram → ChatU frontend)
+    this.app.post('/api/channel/cross-channel-messages', makeCrossChannelHandler(this.channelStore, this.options.logger));
 
     // T021 Plugin-Channel SSE: mount SSE event-stream router
     this.app.use(sseRouter);
