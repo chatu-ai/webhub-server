@@ -24,9 +24,14 @@ function getMime(filePath: string): { contentType: string; disposition: string }
   const known = MIME_MAP[ext];
   if (known) return known;
   const basename = path.basename(filePath);
+  // RFC 5987 encoding for non-ASCII filenames (e.g. Chinese characters).
+  // Use filename*=UTF-8''<percent-encoded> which all modern browsers support.
+  // Also include a ASCII-safe fallback for older clients.
+  const asciiName = basename.replace(/[^ -~]/g, '_');
+  const encodedName = encodeURIComponent(basename);
   return {
     contentType: 'application/octet-stream',
-    disposition: `attachment; filename="${basename}"`,
+    disposition: `attachment; filename="${asciiName}"; filename*=UTF-8''${encodedName}`,
   };
 }
 
