@@ -835,7 +835,13 @@ export class WebHubServer {
         direction: 'inbound',
         messageType,
         content: transformedContent,
-        metadata: { target: body.target, media: body.media, replyTo: body.replyTo, ...(body.metadata ?? {}) },
+        metadata: {
+          target: body.target,
+          media: body.media,
+          replyTo: body.replyTo,
+          ...(body.metadata ?? {}),
+          ...(body.raw !== undefined ? { raw: body.raw } : {}),
+        },
         targetId: body.target?.id,
         role: (body.role as 'visitor' | 'agent' | 'ai' | undefined) ?? 'ai', // Phase 11 T047
         status: 'sent',

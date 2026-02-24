@@ -35,7 +35,7 @@ export function makeCrossChannelHandler(channelStore: ChannelStore, logger?: Log
         return;
       }
 
-      const { sourceChannel, direction, senderName, content, sessionKey, metadata: extraMeta } = req.body;
+      const { sourceChannel, direction, senderName, content, sessionKey, metadata: extraMeta, raw } = req.body;
 
       // Validate required fields
       const missing = ['sourceChannel', 'direction', 'senderName', 'content', 'sessionKey']
@@ -93,6 +93,7 @@ export function makeCrossChannelHandler(channelStore: ChannelStore, logger?: Log
           sourceChannel: String(sourceChannel),
           sessionKey: String(sessionKey),
           ...(extraMeta && typeof extraMeta === 'object' ? extraMeta : {}),
+          ...(raw !== undefined ? { raw } : {}),
         },
         role: direction === 'inbound' ? 'ai' : 'visitor',
         status: 'sent',
