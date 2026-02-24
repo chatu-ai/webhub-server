@@ -17,6 +17,12 @@ dist/
 .DS_Store
 Thumbs.db
 
+# Database files
+*.db
+*.db-shm
+*.db-wal
+data/
+
 # Logs
 *.log
 npm-debug.log*
