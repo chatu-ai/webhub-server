@@ -48,6 +48,8 @@ export interface Channel {
   mode: string;
   /** T003: live plugin WebSocket connection status */
   pluginStatus?: PluginStatus;
+  /** 001-local-file-access: per-channel root directory reported by plugin on connect */
+  workingDir?: string;
   config: Record<string, unknown>;
   metrics: ChannelMetrics;
   createdAt: Date;

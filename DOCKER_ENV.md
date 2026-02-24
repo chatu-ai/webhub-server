@@ -10,6 +10,7 @@
 | `DB_PATH` | SQLite database path | `./data/webhub.db` | No |
 | `WEBHUB_JWT_SECRET` | JWT signing secret | - | No (optional) |
 | `WEBHUB_ADMIN_TOKEN` | Admin API token | - | No (optional) |
+| `WEBHUB_FILE_ROOTS` | Colon-separated list of absolute directories the file-access endpoint (`GET /api/webhub/files`) is allowed to serve. Files outside these directories are rejected with 403. If unset, the endpoint returns 503. | *(unset)* | No — required to serve local files |
 
 ### Data Persistence
 

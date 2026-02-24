@@ -95,6 +95,9 @@ async function initDatabase(): Promise<Database> {
   try { db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_channels_key ON channels(key)`); } catch (_) { /* already exists */ }
   try { db.run(`ALTER TABLE channels ADD COLUMN plugin_status TEXT DEFAULT 'offline'`); } catch (_) { /* already exists */ }
 
+  // 001-local-file-access: per-channel allowed root directory (replaces WEBHUB_FILE_ROOTS env var)
+  try { db.run(`ALTER TABLE channels ADD COLUMN working_dir TEXT`); } catch (_) { /* already exists */ }
+
   // T002 Plugin-Channel SSE: add content_type, streaming_state, payload to messages
   try { db.run(`ALTER TABLE messages ADD COLUMN content_type TEXT DEFAULT 'text'`); } catch (_) { /* already exists */ }
   try { db.run(`ALTER TABLE messages ADD COLUMN streaming_state TEXT`); } catch (_) { /* already exists */ }

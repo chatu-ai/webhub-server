@@ -102,6 +102,11 @@ export class ChannelStore {
     db.prepare('UPDATE channels SET key = ?, updated_at = ? WHERE id = ?').run(key, new Date().toISOString(), id);
   }
 
+  /** 001-local-file-access: persist the working directory reported by the plugin on connect. */
+  updateWorkingDir(id: string, workingDir: string): void {
+    db.prepare('UPDATE channels SET working_dir = ?, updated_at = ? WHERE id = ?').run(workingDir, new Date().toISOString(), id);
+  }
+
   private mapRow(row: Record<string, unknown>): Channel {
     return {
       id: row.id as string,
@@ -117,6 +122,8 @@ export class ChannelStore {
       key: (row.key as string) || undefined,
       // T006: plugin connection status
       pluginStatus: ((row.plugin_status as string) || 'offline') as 'online' | 'reconnecting' | 'offline',
+      // 001-local-file-access: per-channel file root
+      workingDir: (row.working_dir as string) || undefined,
       config: JSON.parse((row.config as string) || '{}'),
       metrics: JSON.parse((row.metrics as string) || '{}') as ChannelMetrics,
       createdAt: new Date(row.created_at as string),

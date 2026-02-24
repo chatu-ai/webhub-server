@@ -14,6 +14,8 @@ import { pluginWsServer } from '../ws/pluginWsServer';
 import { upload, handleUpload, handleUploadError } from './upload';
 import { sseManager } from './sseManager';
 import sseRouter from '../router/sseRouter';
+import localFileRouter from './localFileRouter';
+import { transformLocalPaths } from '../utils/contentTransformer';
 
 export interface WebHubServerOptions {
   port: number;
@@ -176,6 +178,9 @@ export class WebHubServer {
 
     // T021 Plugin-Channel SSE: mount SSE event-stream router
     this.app.use(sseRouter);
+
+    // T008/T009 Local file access: serve validated local files
+    this.app.use('/api/webhub', localFileRouter);
 
     // T008-T010 display-sender-session: session reset & command relay
     this.app.post('/api/webhub/channels/:channelId/sessions/reset', this.resetSession.bind(this));
@@ -652,7 +657,7 @@ export class WebHubServer {
   }
 
   private async connectChannel(req: Request, res: Response): Promise<void> {
-    const { channelId, pluginVersion } = req.body;
+    const { channelId, pluginVersion, workingDir } = req.body;
     const token = req.headers['x-access-token'] as string;
 
     const channel = await this.channelStore.getByAccessToken(token);
@@ -664,6 +669,11 @@ export class WebHubServer {
     // T015: capture optional plugin version reported by the plugin
     if (typeof pluginVersion === 'string' && pluginVersion) {
       this.pluginVersion = pluginVersion;
+    }
+
+    // 001-local-file-access: persist the plugin's working directory for per-channel file serving
+    if (typeof workingDir === 'string' && workingDir) {
+      dbChannelStoreRaw.updateWorkingDir(channelId, workingDir);
     }
 
     await this.channelStore.updateStatus(channelId, 'connected');
@@ -776,12 +786,13 @@ export class WebHubServer {
         }
       }
 
-      // Persist message to database
+      // Persist message to database (T009: transform local file paths to webhub URLs)
+      const transformedContent = transformLocalPaths(body.content?.text || '', channelId);
       const stored = dbMessageStore.create({
         channelId,
         direction: 'inbound',
         messageType,
-        content: body.content?.text || '',
+        content: transformedContent,
         metadata: { target: body.target, media: body.media, replyTo: body.replyTo, ...(body.metadata ?? {}) },
         targetId: body.target?.id,
         role: (body.role as 'visitor' | 'agent' | 'ai' | undefined) ?? 'ai', // Phase 11 T047
