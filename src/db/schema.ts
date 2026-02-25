@@ -53,8 +53,7 @@ async function initDatabase(): Promise<Database> {
       message_type TEXT DEFAULT 'text',
       content TEXT NOT NULL,
       metadata TEXT DEFAULT '{}',
-      sender_id TEXT,
-      sender_name TEXT,
+      sender TEXT,
       target_id TEXT,
       reply_to TEXT,
       status TEXT DEFAULT 'pending',
@@ -100,6 +99,20 @@ async function initDatabase(): Promise<Database> {
 
   // T002 Plugin-Channel SSE: add content_type, streaming_state, payload to messages
   try { db.run(`ALTER TABLE messages ADD COLUMN content_type TEXT DEFAULT 'text'`); } catch (_) { /* already exists */ }
+
+  // 001-message-field-cleanup: migrate sender_id/sender_name → sender JSON column
+  try { db.run(`ALTER TABLE messages ADD COLUMN sender TEXT`); } catch (_) { /* already exists */ }
+  try {
+    db.run(`UPDATE messages SET sender = json_object('id', sender_id, 'name', sender_name)
+      WHERE sender IS NULL AND (sender_id IS NOT NULL OR sender_name IS NOT NULL)`);
+  } catch (_) { /* sender_id/sender_name may already be dropped */ }
+  try { db.run(`ALTER TABLE messages DROP COLUMN sender_id`); } catch (_) { /* already dropped or column absent */ }
+  try { db.run(`ALTER TABLE messages DROP COLUMN sender_name`); } catch (_) { /* already dropped or column absent */ }
+  // 001-message-field-cleanup: migrate reply_to from plain string → JSON object {id}
+  try {
+    db.run(`UPDATE messages SET reply_to = json_object('id', reply_to)
+      WHERE reply_to IS NOT NULL AND json_valid(reply_to) = 0`);
+  } catch (_) { /* already migrated */ }
   try { db.run(`ALTER TABLE messages ADD COLUMN streaming_state TEXT`); } catch (_) { /* already exists */ }
   try { db.run(`ALTER TABLE messages ADD COLUMN payload TEXT`); } catch (_) { /* already exists */ }
 

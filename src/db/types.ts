@@ -3,8 +3,18 @@
 // T003 Plugin-Channel SSE: plugin connection status
 export type PluginStatus = 'online' | 'reconnecting' | 'offline';
 
-// T003 Plugin-Channel SSE: message content type (maps to DB column content_type)
-export type MessageContentType = 'text' | 'image' | 'file' | 'action' | 'unknown';
+/** 001-message-field-cleanup: unified sender object */
+export interface Sender {
+  id?: string;
+  name?: string;
+  avatar?: string;
+}
+
+/** 001-message-field-cleanup: unified replyTo object */
+export interface ReplyTo {
+  id: string;
+  quoteText?: string;
+}
 
 // T003 Plugin-Channel SSE: streaming state for AI reply messages
 export type StreamingState = 'streaming' | 'complete' | 'truncated' | null;
@@ -96,8 +106,6 @@ export interface Message {
   channelId: string;
   direction: 'inbound' | 'outbound';
   messageType: 'text' | 'image' | 'audio' | 'video' | 'file' | 'system' | 'richCard' | 'poll';
-  /** T003: API-facing type name mapping to DB column content_type */
-  contentType?: MessageContentType;
   content: string;
   /** T003: structured payload (image URL, file info, action name, etc.) */
   payload?: Record<string, unknown> | null;
@@ -110,10 +118,11 @@ export interface Message {
     poll?: Poll;
     [key: string]: unknown;
   };
-  senderId?: string;
-  senderName?: string;
+  /** 001-message-field-cleanup: unified sender object (replaces senderId/senderName) */
+  sender?: Sender;
   targetId?: string;
-  replyTo?: string;
+  /** 001-message-field-cleanup: unified replyTo object (replaces string) */
+  replyTo?: ReplyTo;
   threadId?: string;
   /** Phase 11 T044: role of the message author — visitor (end user), agent (human operator), ai (bot) */
   role?: 'visitor' | 'agent' | 'ai';

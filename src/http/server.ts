@@ -441,8 +441,9 @@ export class WebHubServer {
         direction: 'outbound',
         messageType: msgType,
         content: content?.text || '',
-        metadata: { target, media: metadata?.media, replyTo: metadata?.replyTo, ...metadata },
-        senderId: 'webhub',
+        metadata: { target, media: metadata?.media, ...metadata },
+        sender: { id: 'webhub' },
+        replyTo: metadata?.replyTo && typeof metadata.replyTo === 'object' ? metadata.replyTo as { id: string; quoteText?: string } : undefined,
         targetId: target?.id,
         role: 'agent',
         status: 'sent',
@@ -499,8 +500,7 @@ export class WebHubServer {
         messageType: m.messageType,
         content: m.content,
         metadata: m.metadata,
-        senderId: m.senderId,            // 'webhub' = 前端发送; 其他 = 插件来源用户 ID
-        senderName: m.senderName,
+        sender: m.sender,               // { id, name?, avatar? }
         targetId: m.targetId,
         replyTo: m.replyTo,
         role: m.role ?? 'visitor',       // Phase 11 T046: role field
@@ -898,6 +898,16 @@ export class WebHubServer {
         }
       }
 
+      // Parse inbound replyTo — may be a string (legacy) or {id, quoteText?} object
+      let inboundReplyTo: { id: string; quoteText?: string } | undefined;
+      if (message.replyTo) {
+        if (typeof message.replyTo === 'string') {
+          inboundReplyTo = { id: message.replyTo };
+        } else if (typeof message.replyTo === 'object' && message.replyTo.id) {
+          inboundReplyTo = message.replyTo as { id: string; quoteText?: string };
+        }
+      }
+
       // Persist inbound message (from user via webhub plugin)
       const stored = dbMessageStore.create({
         channelId,
@@ -908,10 +918,12 @@ export class WebHubServer {
           messageId: message.messageId || message.id,
           timestamp: message.timestamp || Date.now(),
           media: message.media,
-          replyTo: message.replyTo,
         },
-        senderId: message.sender?.id || message.from?.id || 'unknown',
-        senderName: message.sender?.name || message.from?.name,
+        sender: {
+          id: message.sender?.id || message.from?.id || 'unknown',
+          name: message.sender?.name || message.from?.name,
+        },
+        replyTo: inboundReplyTo,
         targetId: message.target?.id,
         status: 'delivered',
       });
@@ -925,7 +937,7 @@ export class WebHubServer {
         event: 'webhook_received',
         channelId,
         messageId: stored.id,
-        senderId: stored.senderId,
+        senderId: stored.sender?.id,
       });
 
       res.json({
@@ -1029,22 +1041,23 @@ export class WebHubServer {
     res.end();
   }
 
-  // P4 — Edit message content (senderId auth)
+  // P4 — Edit message content (sender.id auth)
   private async editMessage(req: Request, res: Response): Promise<void> {
     const { id: channelId, msgId } = req.params;
-    const { content, senderId } = req.body;
+    const { content, sender } = req.body;
+    const senderId = sender?.id;
     if (!content || !senderId) {
-      res.status(400).json({ success: false, error: 'content and senderId are required' });
+      res.status(400).json({ success: false, error: 'content and sender.id are required' });
       return;
     }
     const updated = dbMessageStore.updateContent(msgId, content, senderId);
     if (!updated) {
-      // Could be not found or senderId mismatch
+      // Could be not found or sender.id mismatch
       const existing = dbMessageStore.getById(msgId);
       if (!existing || existing.channelId !== channelId) {
         res.status(404).json({ success: false, error: 'Message not found' });
       } else {
-        res.status(403).json({ success: false, error: 'Forbidden: senderId does not match' });
+        res.status(403).json({ success: false, error: 'Forbidden: sender.id does not match' });
       }
       return;
     }
@@ -1055,7 +1068,8 @@ export class WebHubServer {
   // P4 — Soft-delete message (admin or sender)
   private async deleteMessage(req: Request, res: Response): Promise<void> {
     const { id: channelId, msgId } = req.params;
-    const requesterId = (req.query.senderId as string) || (req.body?.senderId as string) || '';
+    // Accept sender.id (new) or senderId (legacy query param for CLI tools)
+    const requesterId = (req.body?.sender?.id as string) || (req.query.senderId as string) || (req.body?.senderId as string) || '';
     const providedToken = (req.headers.authorization?.replace('Bearer ', '') || '') as string;
 
     const channel = await this.channelStore.getById(channelId);
@@ -1208,7 +1222,6 @@ export class WebHubServer {
         channelId: channel.id,
         direction: 'inbound',
         messageType: 'text',
-        contentType: 'text',
         content: fullContent,
         metadata: { streaming: true, sourceMessageId: messageId },
         role: 'ai',
@@ -1457,7 +1470,7 @@ export class WebHubServer {
           messageType: 'text',
           content: label,
           role: 'agent',
-          senderId: 'system',
+          sender: { id: 'system' },
           status: 'delivered',
           metadata: { isSystem: true, commandId, commandType: cmd.commandType },
         });

@@ -591,7 +591,7 @@ describe('WebHubServer', () => {
     const BASE_PAYLOAD = {
       sourceChannel: 'tui',
       direction: 'inbound',
-      senderName: 'OpenClaw',
+      sender: { name: 'OpenClaw' },
       content: '## Hello\n\nThis is a **markdown** reply.',
       sessionKey: 'tui-session-001',
     };
@@ -625,7 +625,7 @@ describe('WebHubServer', () => {
       expect(stored).toBeDefined();
       expect(stored!.metadata.sourceChannel).toBe('tui');
       expect(stored!.direction).toBe('inbound');
-      expect(stored!.senderName).toBe('OpenClaw');
+      expect(stored!.sender?.name).toBe('OpenClaw');
     });
 
     it('401: missing X-Access-Token returns 401', async () => {
@@ -664,7 +664,7 @@ describe('WebHubServer', () => {
       const resp = await request(app)
         .post('/api/channel/cross-channel-messages')
         .set('X-Access-Token', channel.accessToken)
-        .send({ sourceChannel: 'tui' }); // missing direction, senderName, content, sessionKey
+        .send({ sourceChannel: 'tui' }); // missing direction, sender.name, content, sessionKey
 
       expect(resp.status).toBe(400);
       expect(resp.body.error).toMatch(/Missing required fields/i);
@@ -692,7 +692,7 @@ describe('WebHubServer', () => {
         .send({
           sourceChannel: 'whatsapp',
           direction: 'outbound',
-          senderName: 'whatsapp',
+          sender: { name: 'whatsapp' },
           content: '请帮我解释 Vue 响应式原理',
           sessionKey: 'wa-session-001',
         });
