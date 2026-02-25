@@ -7,12 +7,19 @@ A standalone web service that provides REST API and WebSocket support for websit
 See the [docs](./docs/) directory for detailed documentation:
 
 ### Deployment
-- [Docker Deployment](./docs/deployment/docker.en.md)
-- [Kubernetes Deployment](./docs/deployment/kubernetes.en.md)
+- [Docker Deployment (EN)](./docs/deployment/docker.en.md)
+- [Docker Deployment (中文)](./docs/deployment/docker.zh.md)
+- [Kubernetes Deployment (EN)](./docs/deployment/kubernetes.en.md)
+- [Kubernetes Deployment (中文)](./docs/deployment/kubernetes.zh.md)
+- [Docker Environment Variables](./DOCKER_ENV.md)
 
 ### API Reference
-- [Admin API](./docs/api/admin-api.en.md) - Frontend/management interfaces (`/api/webhub/*`)
-- [Channel API](./docs/api/channel-api.en.md) - WebHub Channel SDK (`/api/channel/*`)
+- [Admin API (EN)](./docs/api/admin-api.en.md) — Frontend/management interfaces (`/api/webhub/*`)
+- [Admin API (中文)](./docs/api/admin-api.zh.md)
+- [Channel API (EN)](./docs/api/channel-api.en.md) — WebHub Channel SDK (`/api/channel/*`)
+- [Channel API (中文)](./docs/api/channel-api.zh.md)
+- [Message Format (EN)](./docs/MESSAGE_FORMAT.en.md)
+- [消息格式 (中文)](./docs/MESSAGE_FORMAT.zh.md)
 
 [中文文档](./docs/README.zh.md)
 
@@ -47,7 +54,8 @@ WebHub Service is a **backend server** that:
 - **Channel Management**: Create, list, query, delete channels via REST API
 - **Message Routing**: HTTP API and WebSocket support for real-time messaging
 - **SQLite Persistence**: Channels and messages stored in SQLite database
-- **Authentication**: Secret-based channel authentication
+- **Authentication**: Optional password-based authentication with JWT
+- **File Upload**: Per-channel file upload support (max 10 MB)
 - **TypeScript**: Full type safety
 
 ## Quick Start
@@ -66,34 +74,29 @@ npm run build
 npm test
 ```
 
-## API Endpoints
+## Environment Variables
 
-### Admin API (`/api/webhub/*`)
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HTTP_PORT` | `3000` | Server port |
+| `DB_PATH` | `./data/webhub.db` | SQLite database file path |
+| `UPLOAD_DIR` | `./data/uploads` | Uploaded files directory |
+| `AUTH_MODE` | `none` | Authentication mode: `none` or `password` |
+| `JWT_SECRET` | — | JWT signing secret (change in production!) |
 
-For frontend and management interfaces:
+Copy `.env.example` to `.env` and adjust as needed.
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/webhub/channels` | Create channel |
-| GET | `/api/webhub/channels` | List all channels |
-| GET | `/api/webhub/channels/:id` | Get channel details |
-| GET | `/api/webhub/channels/:id/status` | Get channel status |
-| DELETE | `/api/webhub/channels/:id` | Delete channel |
-| POST | `/api/webhub/channels/:id/messages` | Send message |
-| GET | `/api/webhub/channels/:id/messages` | Get messages |
-| POST | `/api/webhub/channels/:id/heartbeat` | Update heartbeat |
+## Docker
 
-### Channel API (`/api/channel/*`)
+```bash
+# Backend only
+docker build -t webhub:latest .
+docker run -d -p 3000:3000 -v $(pwd)/data:/app/data webhub:latest
 
-For WebHub Channel SDK integration:
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/channel/register` | Register channel |
-| POST | `/api/channel/connect` | Connect channel |
-| POST | `/api/channel/disconnect` | Disconnect channel |
-| POST | `/api/channel/messages` | Forward message |
-| POST | `/api/channel/webhook` | Receive webhook |
+# All-in-one (frontend + backend + nginx)
+docker build -f Dockerfile.allinone -t webhub:allinone .
+docker run -d -p 80:80 -v $(pwd)/data:/app/data webhub:allinone
+```
 
 ## Health Check
 
@@ -112,4 +115,4 @@ curl http://localhost:3000/health
 ## License
 
 MIT
-# Trigger CI
+

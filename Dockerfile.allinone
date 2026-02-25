@@ -1,5 +1,10 @@
 # All-in-One Docker image: Nginx + Frontend + Backend
 # 镜像包含：前端静态文件 + 后端服务 + Nginx 反向代理
+#
+# Prerequisites / 前置条件:
+#   The frontend build archive (chatu-web-hub-front-*.tar.gz) must exist in the
+#   repository root before building this image.
+#   前端构建包 (chatu-web-hub-front-*.tar.gz) 必须在构建前存放于仓库根目录。
 
 FROM node:20-alpine AS backend-builder
 
@@ -7,7 +12,9 @@ WORKDIR /app
 
 # Copy backend package files
 COPY package*.json ./
-RUN npm install --legacy-peer-deps
+
+# Install dependencies (clean install for reproducibility)
+RUN npm ci
 
 # Copy backend source
 COPY . .
@@ -18,47 +25,52 @@ RUN npm run build
 # Final stage: Nginx + Backend
 FROM nginx:alpine
 
-# 安装 nodejs (用于运行后端)
+# Install nodejs (required to run the backend)
+# 安装 nodejs（运行后端所必需）
 RUN apk add --no-cache nodejs npm
 
 WORKDIR /app
 
-# 创建非 root 用户
+# Create non-root user / 创建非 root 用户
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nodejs -u 1001
 
-# Copy backend
+# Copy backend build artifacts
 COPY --from=backend-builder /app/dist ./backend/dist
 COPY --from=backend-builder /app/node_modules ./backend/node_modules
 COPY --from=backend-builder /app/package.json ./backend/package.json
 
-# Copy frontend static files (from local frontend/dist)
-COPY frontend/dist/ /usr/share/nginx/html
+# Extract frontend static files from the bundled archive
+# Docker ADD automatically extracts .tar.gz archives into the destination directory
+# Docker ADD 会自动将 .tar.gz 解压到目标目录
+ADD chatu-web-hub-front-*.tar.gz /usr/share/nginx/html/
 
-# Create nginx temp and run directories
+# Create nginx temp directories
 RUN mkdir -p /tmp/nginx /var/run && chown -R nodejs:nodejs /tmp/nginx /var/run
 
-# Copy nginx config (full config with daemon off)
+# Copy nginx config
 COPY nginx.conf /etc/nginx/nginx.conf
 
-# Copy start script
+# Copy and enable start script
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
 
-# Change ownership
+# Set ownership
 RUN chown -R nodejs:nodejs /app /usr/share/nginx/html /tmp/nginx /var/run /start.sh
 USER nodejs
 
-# Environment variables
+# Environment variables (override at runtime as needed)
+# 运行时可通过 -e 覆盖以下环境变量
 ENV NODE_ENV=production
-ENV PORT=3000
-ENV DB_PATH=/data/webhub.db
+ENV HTTP_PORT=3000
+ENV DB_PATH=/app/data/webhub.db
+ENV UPLOAD_DIR=/app/data/uploads
 
 EXPOSE 80
 
-# Health check
+# Health check (backend liveness)
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
   CMD node -e "require('http').get('http://127.0.0.1:3000/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"
 
-# Start script
+# Start nginx + backend
 CMD ["/start.sh"]

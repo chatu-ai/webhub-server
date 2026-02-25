@@ -34,7 +34,8 @@ WebHub is a standalone web service that bridges websites with OpenClaw for real-
 ### API Reference
 - [Admin API](./api/admin-api.en.md) - For frontend/management interfaces (`/api/webhub/*`)
 - [Channel API](./api/channel-api.en.md) - For WebHub Channel SDK (`/api/channel/*`)
-- [Message Format Documentation](./MESSAGE_FORMAT.zh.md) - Complete message types and format specifications (Chinese)
+- [Message Format Documentation (EN)](./MESSAGE_FORMAT.en.md)
+- [Message Format Documentation (中文)](./MESSAGE_FORMAT.zh.md)
 
 [中文文档](./README.zh.md)
 
