@@ -35,13 +35,18 @@ export function makeCrossChannelHandler(channelStore: ChannelStore, logger?: Log
         return;
       }
 
-      const { sourceChannel, direction, senderName, content, sessionKey, metadata: extraMeta, raw } = req.body;
+      const { sourceChannel, direction, sender, content, sessionKey, metadata: extraMeta, raw } = req.body;
 
       // Validate required fields
-      const missing = ['sourceChannel', 'direction', 'senderName', 'content', 'sessionKey']
+      const missing = ['sourceChannel', 'direction', 'content', 'sessionKey']
         .filter(k => !req.body[k]);
       if (missing.length > 0) {
         res.status(400).json({ error: `Missing required fields: ${missing.join(', ')}` });
+        return;
+      }
+      // sender.name is required
+      if (!sender || !sender.name) {
+        res.status(400).json({ error: 'sender.name is required' });
         return;
       }
 
@@ -88,7 +93,10 @@ export function makeCrossChannelHandler(channelStore: ChannelStore, logger?: Log
         direction: direction as 'inbound' | 'outbound',
         messageType: 'text',
         content: String(content),
-        senderName: String(senderName),
+        sender: {
+          id: sender.id ? String(sender.id) : undefined,
+          name: String(sender.name),
+        },
         metadata: {
           sourceChannel: String(sourceChannel),
           sessionKey: String(sessionKey),

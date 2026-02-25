@@ -66,16 +66,14 @@ interface InboundMessage {
   /** 媒体附件（可选） */
   media?: Media[];
   
-  /** 回复的消息 ID（可选） */
-  replyTo?: string;
-}
-```
-
-#### 字段说明
-
-| 字段 | 类型 | 必填 | 描述 |
-|------|------|------|------|
-| `id` | `string` | ✅ | 消息的唯一标识符，由发送方生成 |
+  /** 回复引用（可选） */
+  replyTo?: {
+    /** 回复的目标消息 ID */
+    id: string;
+    /** 引用文本（可选） */
+    quoteText?: string;
+  };
+} |
 | `channelId` | `string` | ✅ | 频道的唯一标识符 |
 | `timestamp` | `number` | ✅ | 消息发送时间（Unix 时间戳，毫秒） |
 | `sender` | `object` | ✅ | 消息发送者的信息 |
@@ -86,7 +84,7 @@ interface InboundMessage {
 | `content.text` | `string` | ✅ | 消息的文本内容 |
 | `content.format` | `string` | ❌ | 文本格式：`plain`（纯文本）、`markdown`（Markdown）、`html`（HTML），默认为 `plain` |
 | `media` | `array` | ❌ | 媒体附件数组，参见 [媒体附件](#媒体附件-media) |
-| `replyTo` | `string` | ❌ | 回复的目标消息 ID |
+| `replyTo` | `object` | ❌ | 回复引用对象：`{ id: string; quoteText?: string }` |
 
 ---
 
@@ -121,7 +119,12 @@ interface OutboundMessage {
   media?: Media[];
   
   /** 回复目标（可选） */
-  replyTo?: string;
+  replyTo?: {
+    /** 回复的目标消息 ID */
+    id: string;
+    /** 引用文本（可选） */
+    quoteText?: string;
+  };
 }
 ```
 
@@ -139,7 +142,7 @@ interface OutboundMessage {
 | `content.text` | `string` | ✅ | 消息的文本内容 |
 | `content.format` | `string` | ❌ | 文本格式：`plain`、`markdown`、`html`，默认为 `plain` |
 | `media` | `array` | ❌ | 媒体附件数组，参见 [媒体附件](#媒体附件-media) |
-| `replyTo` | `string` | ❌ | 回复的目标消息 ID |
+| `replyTo` | `object` | ❌ | 回复引用对象：`{ id: string; quoteText?: string }` |
 
 ---
 

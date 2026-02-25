@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import db from './schema';
-import { Message, MessageContentType, StreamingState } from './types';
+import { Message, Sender, ReplyTo, StreamingState } from './types';
 
 export class MessageStore {
   create(data: Omit<Message, 'id' | 'createdAt'>): Message {
@@ -8,20 +8,19 @@ export class MessageStore {
     const now = new Date().toISOString();
 
     db.prepare(`
-      INSERT INTO messages (id, channel_id, direction, message_type, content_type, content, metadata, sender_id, sender_name, target_id, reply_to, thread_id, role, streaming_state, payload, status, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO messages (id, channel_id, direction, message_type, content_type, content, metadata, sender, target_id, reply_to, thread_id, role, streaming_state, payload, status, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       data.channelId,
       data.direction,
       data.messageType,
-      data.contentType || data.messageType || 'text',
+      data.messageType || 'text',
       data.content,
       JSON.stringify(data.metadata),
-      data.senderId || null,
-      data.senderName || null,
+      data.sender ? JSON.stringify(data.sender) : null,
       data.targetId || null,
-      data.replyTo || null,
+      data.replyTo ? JSON.stringify(data.replyTo) : null,
       data.threadId || null,
       data.role || 'visitor',
       data.streamingState || null,
@@ -65,7 +64,7 @@ export class MessageStore {
     if (!msg) return false;
     // Admin (valid channel accessToken) or sender can delete
     const isAdmin = channelAccessToken != null && accessToken === channelAccessToken;
-    const isSender = msg.senderId != null && msg.senderId === requesterId;
+    const isSender = msg.sender?.id != null && msg.sender.id === requesterId;
     if (!isAdmin && !isSender) return false;
     db.prepare(`UPDATE messages SET status = 'deleted' WHERE id = ?`).run(id);
     return true;
@@ -74,8 +73,8 @@ export class MessageStore {
   updateContent(id: string, content: string, senderId: string): Message | null {
     const msg = this.getById(id);
     if (!msg) return null;
-    if (msg.senderId !== senderId) return null; // 403
-    db.prepare(`UPDATE messages SET content = ? WHERE id = ? AND sender_id = ?`).run(content, id, senderId);
+    if (msg.sender?.id !== senderId) return null; // 403
+    db.prepare(`UPDATE messages SET content = ? WHERE id = ? AND JSON_EXTRACT(sender, '$.id') = ?`).run(content, id, senderId);
     return this.getById(id);
   }
 
@@ -141,22 +140,27 @@ export class MessageStore {
   }
 
   private mapRow(row: Record<string, unknown>): Message {
-    // Plugin-Channel Realtime: DB column is `message_type`, API field is `contentType`.
-    // Both are kept in sync here for backward compat with existing code.
     const dbMessageType = row.message_type as string;
-    const dbContentType = (row.content_type as string | undefined) || dbMessageType;
+    // Parse sender JSON column
+    let sender: Sender | undefined;
+    if (row.sender) {
+      try { sender = JSON.parse(row.sender as string) as Sender; } catch { sender = undefined; }
+    }
+    // Parse reply_to JSON column
+    let replyTo: ReplyTo | undefined;
+    if (row.reply_to) {
+      try { replyTo = JSON.parse(row.reply_to as string) as ReplyTo; } catch { replyTo = undefined; }
+    }
     return {
       id: row.id as string,
       channelId: row.channel_id as string,
       direction: row.direction as 'inbound' | 'outbound',
       messageType: dbMessageType as Message['messageType'],
-      contentType: dbContentType as MessageContentType,
       content: row.content as string,
       metadata: JSON.parse((row.metadata as string) || '{}'),
-      senderId: row.sender_id as string | undefined,
-      senderName: row.sender_name as string | undefined,
+      sender,
       targetId: row.target_id as string | undefined,
-      replyTo: row.reply_to as string | undefined,
+      replyTo,
       threadId: row.thread_id as string | undefined,
       role: (row.role as 'visitor' | 'agent' | 'ai' | undefined) ?? 'visitor',
       streamingState: (row.streaming_state as StreamingState) ?? null,

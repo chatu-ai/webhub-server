@@ -137,3 +137,154 @@ describe('MessageStore.listByChannel — thread_id column (BUG-04 fix)', () => {
     expect(results.every((m) => m.channelId === 'ch_thr2')).toBe(true);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 001-message-field-cleanup: sender JSON column and replyTo JSON column tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('MessageStore — sender JSON column (001-message-field-cleanup)', () => {
+  it('stores and retrieves sender object with id and name', () => {
+    const msg = store.create({
+      channelId: 'ch_sender1',
+      direction: 'inbound',
+      messageType: 'text',
+      content: 'hello',
+      metadata: {},
+      sender: { id: 'user-123', name: '张三' },
+      status: 'delivered',
+    });
+
+    expect(msg.sender).toEqual({ id: 'user-123', name: '张三' });
+  });
+
+  it('stores and retrieves sender object with avatar', () => {
+    const msg = store.create({
+      channelId: 'ch_sender2',
+      direction: 'inbound',
+      messageType: 'text',
+      content: 'hello',
+      metadata: {},
+      sender: { id: 'user-456', name: 'Li', avatar: 'https://example.com/avatar.png' },
+      status: 'delivered',
+    });
+
+    expect(msg.sender?.avatar).toBe('https://example.com/avatar.png');
+  });
+
+  it('returns undefined sender when no sender provided', () => {
+    const msg = store.create({
+      channelId: 'ch_sender3',
+      direction: 'outbound',
+      messageType: 'text',
+      content: 'system',
+      metadata: {},
+      status: 'sent',
+    });
+
+    expect(msg.sender).toBeUndefined();
+  });
+
+  it('softDelete allows sender to delete own message via sender.id', () => {
+    const msg = store.create({
+      channelId: 'ch_del1',
+      direction: 'inbound',
+      messageType: 'text',
+      content: 'to be deleted',
+      metadata: {},
+      sender: { id: 'user-del' },
+      status: 'delivered',
+    });
+
+    const result = store.softDelete(msg.id, 'user-del', null, null);
+    expect(result).toBe(true);
+    expect(store.getById(msg.id)?.status).toBe('deleted');
+  });
+
+  it('softDelete rejects wrong requesterId', () => {
+    const msg = store.create({
+      channelId: 'ch_del2',
+      direction: 'inbound',
+      messageType: 'text',
+      content: 'protected',
+      metadata: {},
+      sender: { id: 'owner-id' },
+      status: 'delivered',
+    });
+
+    const result = store.softDelete(msg.id, 'other-user', null, null);
+    expect(result).toBe(false);
+  });
+
+  it('updateContent allows update when sender.id matches', () => {
+    const msg = store.create({
+      channelId: 'ch_edit1',
+      direction: 'outbound',
+      messageType: 'text',
+      content: 'original',
+      metadata: {},
+      sender: { id: 'webhub' },
+      status: 'sent',
+    });
+
+    const updated = store.updateContent(msg.id, 'updated content', 'webhub');
+    expect(updated?.content).toBe('updated content');
+  });
+
+  it('updateContent returns null when sender.id does not match', () => {
+    const msg = store.create({
+      channelId: 'ch_edit2',
+      direction: 'inbound',
+      messageType: 'text',
+      content: 'original',
+      metadata: {},
+      sender: { id: 'user-abc' },
+      status: 'delivered',
+    });
+
+    const updated = store.updateContent(msg.id, 'hacked', 'attacker');
+    expect(updated).toBeNull();
+  });
+});
+
+describe('MessageStore — replyTo JSON column (001-message-field-cleanup)', () => {
+  it('stores and retrieves replyTo with id only', () => {
+    const msg = store.create({
+      channelId: 'ch_reply1',
+      direction: 'inbound',
+      messageType: 'text',
+      content: 'reply',
+      metadata: {},
+      replyTo: { id: 'parent-msg-id' },
+      status: 'delivered',
+    });
+
+    expect(msg.replyTo).toEqual({ id: 'parent-msg-id' });
+  });
+
+  it('stores and retrieves replyTo with quoteText', () => {
+    const msg = store.create({
+      channelId: 'ch_reply2',
+      direction: 'inbound',
+      messageType: 'text',
+      content: 'reply with quote',
+      metadata: {},
+      replyTo: { id: 'parent-id', quoteText: '引用的内容' },
+      status: 'delivered',
+    });
+
+    expect(msg.replyTo?.quoteText).toBe('引用的内容');
+  });
+
+  it('returns undefined replyTo when no replyTo provided', () => {
+    const msg = store.create({
+      channelId: 'ch_reply3',
+      direction: 'inbound',
+      messageType: 'text',
+      content: 'no reply',
+      metadata: {},
+      status: 'delivered',
+    });
+
+    expect(msg.replyTo).toBeUndefined();
+  });
+});
