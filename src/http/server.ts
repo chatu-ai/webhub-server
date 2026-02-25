@@ -199,6 +199,9 @@ export class WebHubServer {
     this.app.get('/api/channel/commands', this.getPendingCommands.bind(this));
     this.app.post('/api/channel/commands/:commandId/ack', this.ackCommand.bind(this));
 
+    // Commands catalogue (slash-command intellisense)
+    this.app.get('/api/webhub/commands', this.listCommands.bind(this));
+
     // T017-T018 display-sender-session: session list & switch
     this.app.get('/api/webhub/channels/:channelId/sessions', this.listSessions.bind(this));
     this.app.post('/api/webhub/channels/:channelId/sessions/switch', this.switchSession.bind(this));
@@ -1241,6 +1244,37 @@ export class WebHubServer {
     res.status(200).json({ ok: true });
   }
 
+  // ── Commands catalogue: GET /api/webhub/commands ──────────────────────────
+
+  private listCommands(_req: Request, res: Response): void {
+    /** Slash-command catalogue sourced from OpenClaw ACP commands list (read-only research). */
+    const commands: Array<{ name: string; description: string; inputHint?: string }> = [
+      { name: 'help',       description: 'Show help and common commands.' },
+      { name: 'commands',   description: 'List available commands.' },
+      { name: 'status',     description: 'Show current status.' },
+      { name: 'context',    description: 'Explain context usage (list|detail|json).', inputHint: 'list | detail | json' },
+      { name: 'whoami',     description: 'Show sender id (alias: /id).' },
+      { name: 'id',         description: 'Alias for /whoami.' },
+      { name: 'stop',       description: 'Stop the current run.' },
+      { name: 'reset',      description: 'Reset the session (/new).' },
+      { name: 'new',        description: 'Reset the session (/reset).' },
+      { name: 'model',      description: 'Select a model (list|status|<name>).', inputHint: 'list | status | <name>' },
+      { name: 'think',      description: 'Set thinking level (off|minimal|low|medium|high|xhigh).', inputHint: 'off | minimal | low | medium | high | xhigh' },
+      { name: 'verbose',    description: 'Set verbose mode (on|full|off).', inputHint: 'on | full | off' },
+      { name: 'reasoning',  description: 'Toggle reasoning output (on|off|stream).', inputHint: 'on | off | stream' },
+      { name: 'usage',      description: 'Toggle usage footer (off|tokens|full).', inputHint: 'off | tokens | full' },
+      { name: 'config',     description: 'Read or write config (owner-only).' },
+      { name: 'debug',      description: 'Set runtime-only overrides (owner-only).' },
+      { name: 'compact',    description: 'Compact the session history.' },
+      { name: 'elevated',   description: 'Toggle elevated mode (on|off).', inputHint: 'on | off' },
+      { name: 'subagents',  description: 'List or manage sub-agents.' },
+      { name: 'queue',      description: 'Adjust queue mode and options.' },
+      { name: 'send',       description: 'Set send mode (on|off|inherit).', inputHint: 'on | off | inherit' },
+      { name: 'activation', description: 'Set group activation (mention|always).', inputHint: 'mention | always' },
+    ];
+    res.json({ success: true, data: commands });
+  }
+
   // ── T008 display-sender-session: POST /api/webhub/channels/:channelId/sessions/reset ──
 
   private async resetSession(req: Request, res: Response): Promise<void> {
@@ -1259,12 +1293,7 @@ export class WebHubServer {
         return;
       }
 
-      // Bearer token auth (same pattern as deleteMessage)
-      const providedToken = req.headers.authorization?.replace('Bearer ', '').trim() || '';
-      if (channel.accessToken && providedToken !== channel.accessToken) {
-        res.status(401).json({ success: false, error: 'Unauthorized', code: 'UNAUTHORIZED' });
-        return;
-      }
+      // authMiddleware already validated the admin JWT; no second token check needed.
 
       // 409 dedup: don't queue another reset if one is already pending for this sender
       if (sessionCommandStore.hasPending(channelId, senderId)) {
@@ -1287,7 +1316,7 @@ export class WebHubServer {
   private async listSessions(req: Request, res: Response): Promise<void> {
     try {
       const { channelId } = req.params;
-      const senderId = req.query['senderId'] as string | undefined;
+      // senderId filter removed: return all sessions for the channel
 
       const channel = await this.channelStore.getById(channelId);
       if (!channel) {
@@ -1295,15 +1324,11 @@ export class WebHubServer {
         return;
       }
 
-      const providedToken = req.headers.authorization?.replace('Bearer ', '').trim() || '';
-      if (channel.accessToken && providedToken !== channel.accessToken) {
-        res.status(401).json({ success: false, error: 'Unauthorized', code: 'UNAUTHORIZED' });
-        return;
-      }
+      // authMiddleware already validated the admin JWT; no second token check needed.
 
       // Derive sessions from completed reset+switch commands as session boundaries
       const allCmds = sessionCommandStore.listByChannel(channelId)
-        .filter(c => c.status === 'done' && (!senderId || c.senderId === senderId))
+        .filter(c => c.status === 'done')
         .sort((a, b) => a.createdAt - b.createdAt);
 
       // Build session entries: each reset creates a new session period
@@ -1368,11 +1393,7 @@ export class WebHubServer {
         return;
       }
 
-      const providedToken = req.headers.authorization?.replace('Bearer ', '').trim() || '';
-      if (channel.accessToken && providedToken !== channel.accessToken) {
-        res.status(401).json({ success: false, error: 'Unauthorized', code: 'UNAUTHORIZED' });
-        return;
-      }
+      // authMiddleware already validated the admin JWT; no second token check needed.
 
       if (sessionCommandStore.hasPending(channelId, senderId)) {
         res.status(409).json({ success: false, error: 'A session command is already pending', code: 'CONFLICT' });
