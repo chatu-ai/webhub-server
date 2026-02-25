@@ -704,5 +704,45 @@ describe('WebHubServer', () => {
       expect(stored!.role).toBe('visitor');
     });
   });
-});
 
+  // ── T009: GET /api/webhub/commands ────────────────────────────────────────
+  describe('GET /api/webhub/commands', () => {
+    it('should return 200 with success:true and a non-empty commands list', async () => {
+      const resp = await request(app).get('/api/webhub/commands');
+      expect(resp.status).toBe(200);
+      expect(resp.body.success).toBe(true);
+      expect(Array.isArray(resp.body.data)).toBe(true);
+      expect(resp.body.data.length).toBeGreaterThanOrEqual(10);
+    });
+
+    it('each command entry has name and description fields', async () => {
+      const resp = await request(app).get('/api/webhub/commands');
+      for (const cmd of resp.body.data) {
+        expect(typeof cmd.name).toBe('string');
+        expect(cmd.name.length).toBeGreaterThan(0);
+        expect(typeof cmd.description).toBe('string');
+      }
+    });
+  });
+
+  // ── T018: GET /api/webhub/channels/:id/sessions ───────────────────────────
+  describe('GET /api/webhub/channels/:id/sessions', () => {
+    it('should return 200 with empty sessions array for a valid channel', async () => {
+      const channel = await channelStore.create({
+        name: 'Session Test Channel',
+        serverUrl: 'https://test.example.com',
+        status: 'connected',
+        secret: 'session-secret',
+        accessToken: 'session-token',
+      });
+      const resp = await request(app).get(`/api/webhub/channels/${channel.id}/sessions`);
+      expect(resp.status).toBe(200);
+      expect(resp.body.success).toBe(true);
+      expect(Array.isArray(resp.body.data?.sessions)).toBe(true);
+    });
+
+    it('should return 404 for an unknown channel id', async () => {
+      const resp = await request(app).get('/api/webhub/channels/non-existent-id/sessions');
+      expect(resp.status).toBe(404);
+    });
+  });});

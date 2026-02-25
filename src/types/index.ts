@@ -197,3 +197,10 @@ export interface SessionEntry {
   isCurrent: boolean;
   label?: string | null;
 }
+
+/** A slash-command entry returned by GET /api/webhub/commands */
+export interface CommandEntry {
+  name: string;
+  description: string;
+  inputHint?: string;
+}
