@@ -2,13 +2,94 @@
 
 Management API for frontend and admin interfaces.
 
+[中文版本](./admin-api.zh.md)
+
 ## Base URL
 
 ```
 http://localhost:3000/api/webhub
 ```
 
-## Endpoints
+## Authentication
+
+When `AUTH_MODE=password`, all `/api/webhub/*` routes (except `/api/webhub/auth/*`) require a Bearer token.
+
+```
+Authorization: Bearer <token>
+```
+
+---
+
+## Auth Endpoints (`/api/webhub/auth/*`)
+
+These endpoints are always public.
+
+### Get Auth Config
+
+**GET** `/auth/config`
+
+Returns the current authentication mode so the frontend can decide whether to show the login screen.
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "authMode": "none"
+  }
+}
+```
+
+`authMode` values: `"none"` | `"password"`
+
+### Login
+
+**POST** `/auth/login`
+
+**Request Body:**
+
+```json
+{
+  "username": "admin",
+  "password": "changeme"
+}
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "expiresAt": "2027-02-07T18:00:00.000Z",
+    "username": "admin"
+  }
+}
+```
+
+### Get Current User
+
+**GET** `/auth/me`
+
+Requires Bearer token.
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "username": "admin",
+    "expiresAt": "2027-02-07T18:00:00.000Z"
+  }
+}
+```
+
+---
+
+## Channel Management
 
 ### Create Channel
 
@@ -20,7 +101,7 @@ Create a new channel.
 
 ```json
 {
-  "name": "my-server",
+  "serverName": "my-server",
   "serverUrl": "https://example.com",
   "description": "Optional description"
 }
@@ -130,8 +211,6 @@ Get channel connection status.
 
 ### Delete Channel
 
-Delete a channel.
-
 **DELETE** `/channels/:id`
 
 **Response:**
@@ -141,6 +220,10 @@ Delete a channel.
   "success": true
 }
 ```
+
+---
+
+## Messages
 
 ### Send Message
 
@@ -187,28 +270,129 @@ Get message history for a channel.
 | `limit` | number | 100 | Maximum results |
 | `offset` | number | 0 | Pagination offset |
 
+### Search Messages
+
+**GET** `/channels/:id/messages/search`
+
+**Query Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `q` | string | Search query |
+| `limit` | number | Maximum results |
+
+### Edit Message
+
+**PATCH** `/channels/:id/messages/:msgId`
+
+**Request Body:**
+
+```json
+{
+  "content": "Updated text"
+}
+```
+
+### Delete Message
+
+**DELETE** `/channels/:id/messages/:msgId`
+
+### Stream Message
+
+Get a streaming (SSE) view of a message being assembled in real time.
+
+**GET** `/channels/:id/messages/:msgId/stream`
+
+---
+
+## Reactions
+
+### Add Reaction
+
+**POST** `/channels/:id/messages/:msgId/reactions/:emoji`
+
+### Remove Reaction
+
+**DELETE** `/channels/:id/messages/:msgId/reactions/:emoji`
+
+---
+
+## Read Receipts
+
+### Mark Message as Read
+
+**POST** `/channels/:id/messages/:msgId/read`
+
+---
+
+## File Upload
+
+**POST** `/channels/:id/upload`
+
+Content-Type: `multipart/form-data`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `file` | file | File to upload (max 10 MB) |
+
 **Response:**
 
 ```json
 {
   "success": true,
-  "data": [
-    {
-      "id": "uuid",
-      "channelId": "uuid",
-      "direction": "inbound",
-      "messageType": "text",
-      "content": "Hello!",
-      "senderId": "user-uuid",
-      "senderName": "User Name",
-      "status": "delivered",
-      "createdAt": "2026-02-07T18:30:00.000Z"
-    }
-  ]
+  "data": {
+    "url": "/uploads/uuid-filename.ext",
+    "filename": "uuid-filename.ext",
+    "size": 12345,
+    "mimetype": "image/png"
+  }
 }
 ```
 
-### Heartbeat
+---
+
+## Directory
+
+### List Channel Members
+
+**GET** `/channels/:id/directory`
+
+---
+
+## Sessions
+
+### List Sessions
+
+**GET** `/channels/:channelId/sessions`
+
+### Reset Session
+
+**POST** `/channels/:channelId/sessions/reset`
+
+**Request Body:**
+
+```json
+{
+  "senderId": "user-uuid"
+}
+```
+
+### Switch Session
+
+**POST** `/channels/:channelId/sessions/switch`
+
+**Request Body:**
+
+```json
+{
+  "senderId": "user-uuid",
+  "targetSession": "session-id"
+}
+```
+
+---
+
+## Heartbeat
 
 Update channel heartbeat.
 
@@ -225,6 +409,16 @@ Update channel heartbeat.
 }
 ```
 
+---
+
+## Active Channel
+
+Get the currently active (plugin-connected) channel.
+
+**GET** `/channel/active`  (also: `GET /api/webhub/channel/active`)
+
+---
+
 ## Channel Status Values
 
 | Status | Description |
@@ -234,6 +428,8 @@ Update channel heartbeat.
 | `connected` | Channel is connected and active |
 | `disconnected` | Channel was connected but disconnected |
 | `disabled` | Channel is disabled |
+
+---
 
 ## Error Response
 
@@ -252,4 +448,7 @@ Update channel heartbeat.
 | `CREATE_FAILED` | Failed to create channel |
 | `NOT_FOUND` | Channel not found |
 | `CHANNEL_OFFLINE` | Channel is not connected |
+| `INVALID_REQUEST` | Missing or invalid request parameters |
+| `UNAUTHORIZED` | Authentication required or failed |
 | `INTERNAL_ERROR` | Server error |
+

@@ -2,6 +2,8 @@
 
 API for WebHub Channel SDK integration.
 
+[中文版本](./channel-api.zh.md)
+
 ## Base URL
 
 ```
@@ -12,11 +14,13 @@ http://localhost:3000/api/channel
 
 These endpoints are used by the WebHub Channel SDK running on the channel server side.
 
-## Endpoints
+---
+
+## Channel Lifecycle
 
 ### Register Channel
 
-Register a channel with the hub.
+Register a channel with the hub using `channelId` + `secret`.
 
 **POST** `/register`
 
@@ -41,13 +45,30 @@ Register a channel with the hub.
 }
 ```
 
-**Error Response:**
+### Quick Register
+
+Simplified registration using channel key and server URL (creates channel if it doesn't exist).
+
+**POST** `/quick-register`
+
+**Request Body:**
 
 ```json
 {
-  "success": false,
-  "error": "Invalid credentials",
-  "code": "UNAUTHORIZED"
+  "key": "my-channel-key",
+  "serverUrl": "https://example.com"
+}
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "channelId": "uuid",
+    "accessToken": "wh_xxx"
+  }
 }
 ```
 
@@ -67,7 +88,8 @@ Establish connection to the hub.
 
 ```json
 {
-  "channelId": "uuid"
+  "channelId": "uuid",
+  "pluginVersion": "1.0.0"
 }
 ```
 
@@ -113,9 +135,28 @@ Disconnect from the hub.
 }
 ```
 
+### Verify Channel
+
+Verify channel credentials.
+
+**POST** `/verify`
+
+**Request Body:**
+
+```json
+{
+  "channelId": "uuid",
+  "accessToken": "wh_xxx"
+}
+```
+
+---
+
+## Messages
+
 ### Forward Message
 
-Forward a message to OpenClaw.
+Forward a message from the channel to the frontend (via the hub).
 
 **POST** `/messages`
 
@@ -131,9 +172,9 @@ Forward a message to OpenClaw.
 {
   "channelId": "uuid",
   "messageId": "uuid",
-  "target": {
-    "type": "user",
-    "id": "user-uuid"
+  "sender": {
+    "id": "user-uuid",
+    "name": "User Name"
   },
   "content": {
     "text": "Hello from channel!"
@@ -151,17 +192,114 @@ Forward a message to OpenClaw.
 }
 ```
 
-### Webhook
+### Get Pending Messages
 
-Receive messages from OpenClaw.
+Get messages queued for delivery to the plugin (offline queue).
 
-**POST** `/webhook`
+**GET** `/messages/pending`
 
 **Headers:**
 
 | Header | Description |
 |--------|-------------|
-| `X-Channel-ID` | Channel identifier |
+| `X-Access-Token` | Channel access token |
+
+### Acknowledge Message
+
+Mark a message as received/processed.
+
+**POST** `/messages/:id/ack`
+
+**Headers:**
+
+| Header | Description |
+|--------|-------------|
+| `X-Access-Token` | Channel access token |
+
+---
+
+## Streaming
+
+### Send Stream Chunk
+
+Send a partial (streaming) response chunk.
+
+**POST** `/stream/chunk`
+
+**Request Body:**
+
+```json
+{
+  "channelId": "uuid",
+  "messageId": "uuid",
+  "chunk": "partial text..."
+}
+```
+
+### Signal Stream Done
+
+Signal that a streaming response has completed.
+
+**POST** `/stream/done`
+
+**Request Body:**
+
+```json
+{
+  "channelId": "uuid",
+  "messageId": "uuid"
+}
+```
+
+---
+
+## Typing Indicator
+
+**POST** `/typing`  (also: `POST /api/webhub/channel/typing`)
+
+**Request Body:**
+
+```json
+{
+  "channelId": "uuid",
+  "senderId": "user-uuid",
+  "isTyping": true
+}
+```
+
+---
+
+## Commands
+
+Commands are issued by the frontend (e.g., session reset, session switch) and queued for the plugin to process asynchronously.
+
+### Get Pending Commands
+
+**GET** `/commands`
+
+**Headers:**
+
+| Header | Description |
+|--------|-------------|
+| `X-Access-Token` | Channel access token |
+
+### Acknowledge Command
+
+**POST** `/commands/:commandId/ack`
+
+**Headers:**
+
+| Header | Description |
+|--------|-------------|
+| `X-Access-Token` | Channel access token |
+
+---
+
+## Webhooks
+
+Receive a webhook event for a specific channel.
+
+**POST** `/api/webhooks/:channelId`
 
 **Request Body:**
 
@@ -181,31 +319,91 @@ Receive messages from OpenClaw.
 }
 ```
 
+---
+
+## Status & Version
+
+### Get Channel Status
+
+**GET** `/status`
+
+Returns the real connection status of the channel from the database.
+
+**Request Headers:**
+
+| Header | Type | Required | Description |
+|--------|------|----------|-------------|
+| `X-Channel-ID` | string | No | Channel ID to look up |
+
 **Response:**
 
 ```json
 {
-  "success": true
+  "success": true,
+  "data": {
+    "status": "connected",
+    "channelId": "uuid",
+    "lastHeartbeat": "2024-01-01T00:00:00.000Z"
+  }
 }
 ```
+
+### Get Active Channel
+
+**GET** `/active`
+
+Returns the channel currently connected by the plugin.
+
+### Get Service Version
+
+**GET** `/version`
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "serviceVersion": "1.0.0",
+    "buildTime": null,
+    "nodeVersion": "20.11.0",
+    "pluginVersion": "0.1.0"
+  }
+}
+```
+
+`pluginVersion` is populated after a plugin calls `POST /connect` with a `pluginVersion` field.
+
+---
+
+## Cross-Channel Relay
+
+Relay a message from another channel source (TUI, WhatsApp, Telegram) to the ChatU frontend.
+
+**POST** `/cross-channel-messages`
+
+---
 
 ## SDK Integration Flow
 
 ```
-1. Channel Server starts
+1. Channel server starts
    ↓
 2. POST /register { channelId, secret }
    ↓
 3. Receive accessToken
    ↓
-4. POST /connect (with accessToken)
+4. POST /connect { channelId } (with X-Access-Token header)
    ↓
 5. Status: connected
    ↓
-6. Send/Receive messages via WebSocket or POST /messages
+6. Forward messages via POST /messages
+   Stream chunks via POST /stream/chunk + /stream/done
    ↓
 7. POST /disconnect (when shutting down)
 ```
+
+---
 
 ## WebSocket Connection
 
@@ -231,79 +429,24 @@ ws.onmessage = (event) => {
 };
 ```
 
+---
+
+## SSE (Server-Sent Events)
+
+The hub exposes an SSE endpoint so the frontend can receive real-time events without WebSocket:
+
+```
+GET /api/webhub/channels/:id/sse
+```
+
+---
+
 ## Error Codes
 
 | Code | Description |
 |------|-------------|
 | `UNAUTHORIZED` | Invalid credentials or token |
 | `INVALID_REQUEST` | Missing required fields |
+| `NOT_FOUND` | Resource not found |
 | `INTERNAL_ERROR` | Server error |
 
----
-
-## Channel Status (Fixed — BUG-01)
-
-**GET** `/api/channel/status`
-
-Returns the **real** connection status of the channel from the database. Previously this endpoint returned a hardcoded `"connected"` regardless of actual state — this has been fixed.
-
-**Request Headers:**
-
-| Header | Type | Required | Description |
-|--------|------|----------|-------------|
-| `X-Channel-ID` | string | No | Channel ID to look up. If omitted, returns generic `unknown` status. |
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "data": {
-    "status": "connected",
-    "channelId": "wh_ch_abc123",
-    "lastHeartbeat": "2024-01-01T00:00:00.000Z"
-  }
-}
-```
-
-When no `X-Channel-ID` is provided:
-
-```json
-{
-  "success": true,
-  "data": {
-    "status": "unknown",
-    "timestamp": "2024-01-01T00:00:00.000Z"
-  }
-}
-```
-
----
-
-## Service Version
-
-**GET** `/api/channel/version`
-
-Returns the current service version and optionally the connected plugin version.
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "data": {
-    "serviceVersion": "1.0.0",
-    "buildTime": null,
-    "nodeVersion": "20.11.0",
-    "pluginVersion": "0.1.0"
-  }
-}
-```
-
-`pluginVersion` is populated after a plugin calls `POST /api/channel/connect` with a `pluginVersion` field in the request body. It is `null` if no connection has been established yet.
-
-**Use case:** Call this endpoint after reloading/upgrading a plugin to verify the new version is active:
-
-```bash
-curl http://localhost:3000/api/channel/version
-```
