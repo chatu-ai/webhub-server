@@ -48,4 +48,4 @@ See [Deployment Guide](./deployment/docker.en.md) for detailed setup instruction
 | Project | Description |
 |---------|-------------|
 | [openclaw-web-hub-channel](https://github.com/chatu-ai/openclaw-web-hub-channel) | Channel SDK |
-| [chatu-web-hub-front](https://github.com/chatu-ai/chatu-web-hub-front) | Reference frontend UI |
+| [webhub-frontend](https://github.com/chatu-ai/webhub-frontend) | Reference frontend UI |

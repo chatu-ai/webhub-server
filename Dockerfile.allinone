@@ -2,9 +2,9 @@
 # 镜像包含：前端静态文件 + 后端服务 + Nginx 反向代理
 #
 # Prerequisites / 前置条件:
-#   The frontend build archive (chatu-web-hub-front-*.tar.gz) must exist in the
+#   The frontend build archive (webhub-frontend-*.tar.gz) must exist in the
 #   repository root before building this image.
-#   前端构建包 (chatu-web-hub-front-*.tar.gz) 必须在构建前存放于仓库根目录。
+#   前端构建包 (webhub-frontend-*.tar.gz) 必须在构建前存放于仓库根目录。
 
 FROM node:20-alpine AS backend-builder
 
@@ -43,7 +43,7 @@ COPY --from=backend-builder /app/package.json ./backend/package.json
 # Extract frontend static files from the bundled archive
 # Docker ADD automatically extracts .tar.gz archives into the destination directory
 # Docker ADD 会自动将 .tar.gz 解压到目标目录
-ADD chatu-web-hub-front-*.tar.gz /usr/share/nginx/html/
+ADD webhub-frontend-*.tar.gz /usr/share/nginx/html/
 
 # Create nginx temp directories
 RUN mkdir -p /tmp/nginx /var/run && chown -R nodejs:nodejs /tmp/nginx /var/run

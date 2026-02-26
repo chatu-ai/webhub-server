@@ -1143,20 +1143,27 @@ export class WebHubServer {
 
   // P4 — Plugin typing indicator
   private async handleTyping(req: Request, res: Response): Promise<void> {
-    const authHeader = req.headers.authorization || '';
-    const token = authHeader.replace('Bearer ', '').trim();
     const { channelId, username } = req.body;
     if (!channelId || !username) {
       res.status(400).json({ success: false, error: 'channelId and username are required' });
       return;
     }
-    if (token) {
-      const channel = await this.channelStore.getById(channelId);
-      if (!channel || channel.accessToken !== token) {
-        res.status(401).json({ success: false, error: 'Unauthorized' });
-        return;
+
+    // /api/webhub/channel/typing is already protected by authMiddleware (JWT).
+    // /api/channel/typing is the plugin-facing route and authenticates via channel access token.
+    const isAdminRoute = req.path === '/api/webhub/channel/typing' || req.originalUrl.startsWith('/api/webhub/');
+    if (!isAdminRoute) {
+      const authHeader = req.headers.authorization || '';
+      const token = authHeader.replace('Bearer ', '').trim();
+      if (token) {
+        const channel = await this.channelStore.getById(channelId);
+        if (!channel || channel.accessToken !== token) {
+          res.status(401).json({ success: false, error: 'Unauthorized' });
+          return;
+        }
       }
     }
+
     const ts = Date.now();
     broadcaster.broadcast(channelId, { type: 'typing', data: { channelId, username, ts } });
     res.json({ success: true });

@@ -6,8 +6,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "fuser -k 3000/tcp 2>/dev/null; sleep 0.3; tsx src/index.ts",
-    "dev:watch": "tsx watch src/index.ts",
+    "dev": "fuser -k 3000/tcp 2>/dev/null; sleep 0.3; node --env-file=.env --import tsx src/index.ts",
+    "dev:watch": "node --env-file=.env --watch --import tsx src/index.ts",
     "register": "tsx src/cli/register.ts",
     "test": "jest",
     "test:coverage": "jest --coverage",

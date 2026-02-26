@@ -84,7 +84,7 @@ jobs:
           
           # 方法1: 从 API 获取最新 release (使用 PAT 以访问前端仓库)
           VERSION=$(curl -s -H "Authorization: Bearer ${{ secrets.FRONTEND_TOKEN }}" \
-            https://api.github.com/repos/chatu-ai/chatu-web-hub-front/releases/latest | \
+            https://api.github.com/repos/chatu-ai/webhub-frontend/releases/latest | \
             grep -oP '"tag_name": "\K[^"]+' | head -1)
           
           if [ -z "$VERSION" ]; then
@@ -106,13 +106,13 @@ jobs:
         if: steps['frontend-version'].outputs.version != 'none' && steps['frontend-version'].outputs.version != 'latest'
         run: |
           VERSION="${{ steps['frontend-version'].outputs.version }}"
-          FILENAME="chatu-web-hub-front-${VERSION}.tar.gz"
+          FILENAME="webhub-frontend-${VERSION}.tar.gz"
           echo "Downloading $FILENAME from GitHub Release..."
           # 使用 GitHub Token 认证下载私有仓库的 Release 资产
           curl -L -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -H "Accept: application/octet-stream" \
             -o "$FILENAME" \
-            "https://github.com/chatu-ai/chatu-web-hub-front/releases/download/${VERSION}/${FILENAME}"
+            "https://github.com/chatu-ai/webhub-frontend/releases/download/${VERSION}/${FILENAME}"
           echo "Downloaded: $FILENAME"
           ls -la "$FILENAME"
 

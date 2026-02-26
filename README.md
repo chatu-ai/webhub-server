@@ -110,7 +110,7 @@ curl http://localhost:3000/health
 | Project | Description |
 |---------|-------------|
 | [openclaw-web-hub-channel](https://github.com/chatu-ai/openclaw-web-hub-channel) | Channel SDK (this service uses it) |
-| [chatu-web-hub-front](https://github.com/chatu-ai/chatu-web-hub-front) | Reference frontend UI |
+| [webhub-frontend](https://github.com/chatu-ai/webhub-frontend) | Reference frontend UI |
 
 ## License
 
