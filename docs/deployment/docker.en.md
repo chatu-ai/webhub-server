@@ -46,7 +46,7 @@ docker run -d \
   --name webhub \
   -p 3000:3000 \
   -v $(pwd)/data:/app/data \
-  ghcr.io/chatu-ai/chatu-web-hub-service:latest
+  ghcr.io/chatu-ai/webhub-server:latest
 ```
 
 ### Verify Deployment
@@ -74,7 +74,7 @@ docker run -d \
   -v $(pwd)/data:/app/data \
   -e NODE_ENV=production \
   -e ENABLE_FRONTEND=true \
-  ghcr.io/chatu-ai/chatu-web-hub-service:latest
+  ghcr.io/chatu-ai/webhub-server:latest
 ```
 
 Access the application at `http://localhost`. The API is also available at `http://localhost/api/webhub/`.
@@ -87,8 +87,8 @@ Access the application at `http://localhost`. The API is also available at `http
 
 ```bash
 # Clone the repository
-git clone https://github.com/chatu-ai/chatu-web-hub-service.git
-cd chatu-web-hub-service
+git clone https://github.com/chatu-ai/webhub-server.git
+cd webhub-server
 
 # Create data directory
 mkdir -p ./data
@@ -102,7 +102,7 @@ docker compose up -d
 ```yaml
 services:
   webhub:
-    image: ghcr.io/chatu-ai/chatu-web-hub-service:latest
+    image: ghcr.io/chatu-ai/webhub-server:latest
     container_name: webhub
     ports:
       - "3000:3000"

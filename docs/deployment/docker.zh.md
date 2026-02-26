@@ -32,7 +32,7 @@ docker run -d \
   --name webhub \
   -p 3000:3000 \
   -v $(pwd)/data:/app/data \
-  ghcr.io/chatu-ai/chatu-web-hub-service:latest
+  ghcr.io/chatu-ai/webhub-server:latest
 ```
 
 ### 验证部署
@@ -59,7 +59,7 @@ docker run -d \
   -v $(pwd)/data:/app/data \
   -e NODE_ENV=production \
   -e ENABLE_FRONTEND=true \
-  ghcr.io/chatu-ai/chatu-web-hub-service:latest
+  ghcr.io/chatu-ai/webhub-server:latest
 ```
 
 在浏览器访问 `http://localhost` 即可使用前端 UI，API 仍通过 Nginx 代理。
@@ -72,8 +72,8 @@ docker run -d \
 
 ```bash
 # 克隆仓库
-git clone https://github.com/chatu-ai/chatu-web-hub-service.git
-cd chatu-web-hub-service
+git clone https://github.com/chatu-ai/webhub-server.git
+cd webhub-server
 
 # 创建数据目录
 mkdir -p ./data
@@ -87,7 +87,7 @@ docker compose up -d
 ```yaml
 services:
   webhub:
-    image: ghcr.io/chatu-ai/chatu-web-hub-service:latest
+    image: ghcr.io/chatu-ai/webhub-server:latest
     container_name: webhub
     ports:
       - "3000:3000"

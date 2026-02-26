@@ -32,7 +32,7 @@ docker run -d \
   --name webhub \
   -p 3000:3000 \
   -v $(pwd)/data:/app/data \
-  ghcr.io/chatu-ai/chatu-web-hub-service:latest
+  ghcr.io/chatu-ai/webhub-server:latest
 ```
 
 ### Example: Full Configuration
@@ -49,7 +49,7 @@ docker run -d \
   -e AUTH_USERNAME=admin \
   -e AUTH_PASSWORD=your-secure-password \
   -e JWT_SECRET=$(node -e "console.log(require('crypto').randomBytes(64).toString('hex'))") \
-  ghcr.io/chatu-ai/chatu-web-hub-service:latest
+  ghcr.io/chatu-ai/webhub-server:latest
 ```
 
 ### Docker Compose (Recommended)
@@ -57,7 +57,7 @@ docker run -d \
 ```yaml
 services:
   webhub:
-    image: ghcr.io/chatu-ai/chatu-web-hub-service:latest
+    image: ghcr.io/chatu-ai/webhub-server:latest
     ports:
       - "3000:3000"
     volumes:
@@ -90,7 +90,7 @@ docker run -d \
   -e HTTP_PORT=3000 \
   -e DB_PATH=/app/data/webhub.db \
   -e ENABLE_FRONTEND=true \
-  ghcr.io/chatu-ai/chatu-web-hub-service:latest
+  ghcr.io/chatu-ai/webhub-server:latest
 ```
 
 ---
@@ -127,7 +127,7 @@ docker run -d \
   --name webhub \
   -p 3000:3000 \
   -v $(pwd)/data:/app/data \
-  ghcr.io/chatu-ai/chatu-web-hub-service:latest
+  ghcr.io/chatu-ai/webhub-server:latest
 ```
 
 ### 示例：完整配置
@@ -144,7 +144,7 @@ docker run -d \
   -e AUTH_USERNAME=admin \
   -e AUTH_PASSWORD=your-secure-password \
   -e JWT_SECRET=$(node -e "console.log(require('crypto').randomBytes(64).toString('hex'))") \
-  ghcr.io/chatu-ai/chatu-web-hub-service:latest
+  ghcr.io/chatu-ai/webhub-server:latest
 ```
 
 ### Docker Compose（推荐）
@@ -152,7 +152,7 @@ docker run -d \
 ```yaml
 services:
   webhub:
-    image: ghcr.io/chatu-ai/chatu-web-hub-service:latest
+    image: ghcr.io/chatu-ai/webhub-server:latest
     ports:
       - "3000:3000"
     volumes:
@@ -185,6 +185,6 @@ docker run -d \
   -e HTTP_PORT=3000 \
   -e DB_PATH=/app/data/webhub.db \
   -e ENABLE_FRONTEND=true \
-  ghcr.io/chatu-ai/chatu-web-hub-service:latest
+  ghcr.io/chatu-ai/webhub-server:latest
 ```
 

@@ -766,5 +766,5 @@ curl -X POST http://localhost:3000/api/channel/messages \
 ## 支持与反馈
 
 如有问题或建议，请：
-- 提交 Issue：https://github.com/chatu-ai/chatu-web-hub-service/issues
+- 提交 Issue：https://github.com/chatu-ai/webhub-server/issues
 - 联系邮箱：support@example.com

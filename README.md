@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/chatu-ai/webhub-server/actions/workflows/ci.yml/badge.svg)](https://github.com/chatu-ai/webhub-server/actions/workflows/ci.yml)
 [![Publish Docker Image](https://github.com/chatu-ai/webhub-server/actions/workflows/publish.yml/badge.svg)](https://github.com/chatu-ai/webhub-server/actions/workflows/publish.yml)
-[![Docker Image](https://img.shields.io/badge/docker-ghcr.io-blue?logo=docker)](https://ghcr.io/chatu-ai/chatu-web-hub-service)
+[![Docker Image](https://img.shields.io/badge/docker-ghcr.io-blue?logo=docker)](https://ghcr.io/chatu-ai/webhub-server)
 [![Node.js](https://img.shields.io/badge/node-20-brightgreen?logo=node.js)](https://nodejs.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 
@@ -100,7 +100,7 @@ docker run -d -p 3000:3000 -v $(pwd)/data:/app/data webhub:latest
 # All-in-one (frontend + backend + nginx)
 docker run -d -p 80:80 -v $(pwd)/data:/app/data \
   -e ENABLE_FRONTEND=true \
-  ghcr.io/chatu-ai/chatu-web-hub-service:latest
+  ghcr.io/chatu-ai/webhub-server:latest
 ```
 
 ## Health Check
