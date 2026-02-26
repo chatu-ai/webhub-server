@@ -47,24 +47,22 @@ curl http://localhost:3000/health
 
 ---
 
-## 方式二：前后端一体化
+## 方式二：前后端一体化（启用前端 UI）
 
-`Dockerfile.allinone` 将后端与预构建的前端打包到单个容器中，由 Nginx 提供服务。
+同一镜像通过环境变量 `ENABLE_FRONTEND=true` 启用 Nginx 并提供前端静态资源。
 
 ```bash
-# 构建一体化镜像
-docker build -f Dockerfile.allinone -t webhub:allinone .
-
-# 运行容器
+# 使用已发布镜像（推荐）
 docker run -d \
   --name webhub-allinone \
   -p 80:80 \
   -v $(pwd)/data:/app/data \
   -e NODE_ENV=production \
-  webhub:allinone
+  -e ENABLE_FRONTEND=true \
+  ghcr.io/chatu-ai/chatu-web-hub-service:latest
 ```
 
-在浏览器访问 `http://localhost` 即可使用。
+在浏览器访问 `http://localhost` 即可使用前端 UI，API 仍通过 Nginx 代理。
 
 ---
 
@@ -143,6 +141,7 @@ docker compose down -v
 
 | 变量名 | 默认值 | 必填 | 说明 |
 |--------|--------|------|------|
+| `ENABLE_FRONTEND` | `false` | 否 | `true` 启动 Nginx 提供前端 UI；`false` 仅后端 |
 | `NODE_ENV` | `production` | 否 | Node 运行环境 |
 | `HTTP_PORT` | `3000` | 否 | 后端服务端口 |
 | `DB_PATH` | `./data/webhub.db` | 否 | SQLite 数据库文件路径 |

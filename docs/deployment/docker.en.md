@@ -63,22 +63,21 @@ curl http://localhost:3000/health
 
 ## Option 2: All-in-One (Frontend + Backend)
 
-The `Dockerfile.allinone` bundles the backend and the pre-built frontend into a single container behind Nginx.
+The same image serves both the backend API and the frontend UI when `ENABLE_FRONTEND=true` is set.
+Nginx starts automatically and proxies all `/api/` routes to the backend.
 
 ```bash
-# Build the all-in-one image
-docker build -f Dockerfile.allinone -t webhub:allinone .
-
-# Run the container
+# Using the published image (recommended)
 docker run -d \
   --name webhub-allinone \
   -p 80:80 \
   -v $(pwd)/data:/app/data \
   -e NODE_ENV=production \
-  webhub:allinone
+  -e ENABLE_FRONTEND=true \
+  ghcr.io/chatu-ai/chatu-web-hub-service:latest
 ```
 
-Access the application at `http://localhost`.
+Access the application at `http://localhost`. The API is also available at `http://localhost/api/webhub/`.
 
 ---
 
@@ -138,6 +137,7 @@ services:
 
 | Variable | Default | Required | Description |
 |----------|---------|----------|-------------|
+| `ENABLE_FRONTEND` | `false` | No | `true` starts Nginx and serves the frontend UI; `false` backend-only |
 | `NODE_ENV` | `production` | No | Node environment |
 | `HTTP_PORT` | `3000` | No | Backend server port |
 | `DB_PATH` | `./data/webhub.db` | No | SQLite database file path |

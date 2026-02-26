@@ -9,8 +9,6 @@ See the [docs](./docs/) directory for detailed documentation:
 ### Deployment
 - [Docker Deployment (EN)](./docs/deployment/docker.en.md)
 - [Docker Deployment (中文)](./docs/deployment/docker.zh.md)
-- [Kubernetes Deployment (EN)](./docs/deployment/kubernetes.en.md)
-- [Kubernetes Deployment (中文)](./docs/deployment/kubernetes.zh.md)
 - [Docker Environment Variables](./DOCKER_ENV.md)
 
 ### API Reference
@@ -94,8 +92,9 @@ docker build -t webhub:latest .
 docker run -d -p 3000:3000 -v $(pwd)/data:/app/data webhub:latest
 
 # All-in-one (frontend + backend + nginx)
-docker build -f Dockerfile.allinone -t webhub:allinone .
-docker run -d -p 80:80 -v $(pwd)/data:/app/data webhub:allinone
+docker run -d -p 80:80 -v $(pwd)/data:/app/data \
+  -e ENABLE_FRONTEND=true \
+  ghcr.io/chatu-ai/chatu-web-hub-service:latest
 ```
 
 ## Health Check

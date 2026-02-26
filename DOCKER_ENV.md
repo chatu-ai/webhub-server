@@ -6,6 +6,7 @@
 
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
+| `ENABLE_FRONTEND` | `true` starts Nginx and serves the frontend UI; `false` backend-only | `false` | No |
 | `NODE_ENV` | Node environment | `production` | No |
 | `HTTP_PORT` | Backend server port | `3000` | No |
 | `DB_PATH` | Full path to the SQLite database file | `./data/webhub.db` | No |
@@ -76,7 +77,9 @@ services:
       retries: 3
 ```
 
-### All-in-One Image (Frontend + Backend)
+### All-in-One (Frontend + Backend)
+
+Set `ENABLE_FRONTEND=true` to start Nginx and serve the bundled frontend UI.
 
 ```bash
 docker run -d \
@@ -86,7 +89,8 @@ docker run -d \
   -e NODE_ENV=production \
   -e HTTP_PORT=3000 \
   -e DB_PATH=/app/data/webhub.db \
-  ghcr.io/chatu-ai/chatu-web-hub-service:allinone
+  -e ENABLE_FRONTEND=true \
+  ghcr.io/chatu-ai/chatu-web-hub-service:latest
 ```
 
 ---
@@ -97,6 +101,7 @@ docker run -d \
 
 | 变量名 | 说明 | 默认值 | 必填 |
 |--------|------|--------|------|
+| `ENABLE_FRONTEND` | `true` 启动 Nginx 并提供前端 UI；`false` 仅后端 | `false` | 否 |
 | `NODE_ENV` | Node 运行环境 | `production` | 否 |
 | `HTTP_PORT` | 后端服务端口 | `3000` | 否 |
 | `DB_PATH` | SQLite 数据库文件完整路径 | `./data/webhub.db` | 否 |
@@ -167,7 +172,9 @@ services:
       retries: 3
 ```
 
-### 一体化镜像（前端 + 后端）
+### 一体化（前端 + 后端）
+
+设置 `ENABLE_FRONTEND=true` 可启动 Nginx 并提供捆绑的前端 UI。
 
 ```bash
 docker run -d \
@@ -177,6 +184,7 @@ docker run -d \
   -e NODE_ENV=production \
   -e HTTP_PORT=3000 \
   -e DB_PATH=/app/data/webhub.db \
-  ghcr.io/chatu-ai/chatu-web-hub-service:allinone
+  -e ENABLE_FRONTEND=true \
+  ghcr.io/chatu-ai/chatu-web-hub-service:latest
 ```
 
