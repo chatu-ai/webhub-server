@@ -1,5 +1,11 @@
 # WebHub Backend Service
 
+[![CI](https://github.com/chatu-ai/webhub-server/actions/workflows/ci.yml/badge.svg)](https://github.com/chatu-ai/webhub-server/actions/workflows/ci.yml)
+[![Publish Docker Image](https://github.com/chatu-ai/webhub-server/actions/workflows/publish.yml/badge.svg)](https://github.com/chatu-ai/webhub-server/actions/workflows/publish.yml)
+[![Docker Image](https://img.shields.io/badge/docker-ghcr.io-blue?logo=docker)](https://ghcr.io/chatu-ai/chatu-web-hub-service)
+[![Node.js](https://img.shields.io/badge/node-20-brightgreen?logo=node.js)](https://nodejs.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
+
 A standalone web service that provides REST API and WebSocket support for website messaging channels.
 
 ## Documentation
