@@ -1,0 +1,63 @@
+name: Create Release Tag
+
+# Manually trigger to create the next vYYYY.MM.DD.N tag and fire publish.
+# The sequence number is auto-incremented based on existing tags for today.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (print tag only, do not push)'
+        required: false
+        default: 'false'
+        type: boolean
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # needed to push the tag
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-tags: true
+          fetch-depth: 0
+
+      - name: Compute next tag
+        id: next-tag
+        run: |
+          TODAY=$(date -u +%Y.%m.%d)
+          PREFIX="v${TODAY}."
+
+          # Find the highest sequence number used today
+          LAST=$(git tag --list "${PREFIX}*" \
+            | sed "s/${PREFIX}//" \
+            | grep -E '^[0-9]+$' \
+            | sort -n \
+            | tail -1)
+
+          if [ -z "$LAST" ]; then
+            NEXT=1
+          else
+            NEXT=$((LAST + 1))
+          fi
+
+          TAG="${PREFIX}${NEXT}"
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "Next tag: ${TAG}"
+
+      - name: Push tag
+        if: ${{ inputs.dry_run != 'true' }}
+        run: |
+          TAG="${{ steps.next-tag.outputs.tag }}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "$TAG"
+          git push origin "$TAG"
+          echo "Pushed tag: $TAG (publish workflow will trigger automatically)"
+
+      - name: Dry run summary
+        if: ${{ inputs.dry_run == 'true' }}
+        run: echo "DRY RUN — would push tag: ${{ steps.next-tag.outputs.tag }}"
