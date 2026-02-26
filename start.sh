@@ -3,6 +3,12 @@
 # ENABLE_FRONTEND=true  → backend + nginx (frontend UI served via nginx)
 # ENABLE_FRONTEND=false → backend only, exposed directly on HTTP_PORT (default)
 
+# Fix data directory permissions at runtime.
+# Required when using Kubernetes subPath volume mounts, which bypass fsGroup.
+echo "Fixing /app/data ownership..."
+mkdir -p /app/data /app/data/uploads
+chown -R nodejs:nodejs /app/data
+
 # Create required runtime directories
 mkdir -p /tmp/nginx /var/run /var/log/nginx
 
@@ -13,9 +19,9 @@ if [ "$ENABLE_FRONTEND" = "true" ]; then
         exit 1
     fi
 
-    # Start backend in background
+    # Start backend in background (dropped to nodejs user via su-exec)
     echo "Starting backend..."
-    node /app/backend/dist/index.js &
+    su-exec nodejs node /app/backend/dist/index.js &
     BACKEND_PID=$!
 
     # Wait for backend to be ready (up to 15 seconds)
@@ -39,7 +45,7 @@ if [ "$ENABLE_FRONTEND" = "true" ]; then
     # Keep container alive by waiting for the backend process
     wait $BACKEND_PID
 else
-    # Backend-only mode: exec as PID 1 for correct signal forwarding
+    # Backend-only mode: exec via su-exec as PID 1 for correct signal forwarding
     echo "Starting backend (frontend UI disabled)..."
-    exec node /app/backend/dist/index.js
+    exec su-exec nodejs node /app/backend/dist/index.js
 fi

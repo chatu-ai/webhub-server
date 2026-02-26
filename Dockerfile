@@ -46,8 +46,8 @@ RUN set -eux; \
 # =============================================================================
 FROM nginx:alpine
 
-# Install Node.js (needed to run the backend)
-RUN apk add --no-cache nodejs
+# Install Node.js and su-exec (su-exec drops privileges at runtime)
+RUN apk add --no-cache nodejs su-exec
 
 WORKDIR /app
 
@@ -74,7 +74,9 @@ RUN chmod +x /start.sh
 # Set ownership
 RUN chown -R nodejs:nodejs /app /usr/share/nginx/html /tmp/nginx /var/run /var/log/nginx /start.sh
 
-USER nodejs
+# Run as root so start.sh can chown the PVC-mounted /app/data at startup,
+# then su-exec drops to nodejs before executing node/nginx.
+# USER nodejs  ← intentionally omitted; privilege drop is done in start.sh
 
 # Environment variables — override at runtime with -e
 ENV NODE_ENV=production
