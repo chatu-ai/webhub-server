@@ -108,7 +108,12 @@ export class WebHubServer {
   }
 
   private setupMiddleware(): void {
-    this.app.use(cors());
+    // CORS: allow configurable origins (default: same-origin only).
+    // Set CORS_ORIGIN=* or CORS_ORIGIN=https://example.com to allow cross-origin requests.
+    const corsOrigin = process.env.CORS_ORIGIN;
+    if (corsOrigin) {
+      this.app.use(cors({ origin: corsOrigin === '*' ? '*' : corsOrigin.split(',').map(o => o.trim()) }));
+    }
     this.app.use(express.json());
     // Serve uploaded files statically
     const uploadDir = process.env.UPLOAD_DIR || path.join(process.cwd(), 'data/uploads');

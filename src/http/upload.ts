@@ -11,11 +11,26 @@ function getUploadDir(): string {
   return process.env.UPLOAD_DIR || path.join(process.cwd(), 'data/uploads');
 }
 
+/**
+ * Sanitize channelId to prevent path traversal attacks.
+ * Allows only alphanumeric characters, hyphens, and underscores.
+ */
+function sanitizeChannelId(raw: string): string {
+  return raw.replace(/[^a-zA-Z0-9\-_]/g, '_').substring(0, 64);
+}
+
 export const upload = multer({
   storage: multer.diskStorage({
     destination: (req: Request, _file, cb) => {
-      const channelId = req.params.id || 'unknown';
-      const dir = path.join(getUploadDir(), channelId);
+      const rawId = req.params.id || 'unknown';
+      const channelId = sanitizeChannelId(rawId);
+      const baseDir = path.resolve(getUploadDir());
+      const dir = path.resolve(baseDir, channelId);
+      // Guard: ensure resolved path is still inside baseDir
+      if (!dir.startsWith(baseDir + path.sep) && dir !== baseDir) {
+        cb(new Error('Invalid channel ID'), '');
+        return;
+      }
       fs.mkdirSync(dir, { recursive: true });
       cb(null, dir);
     },
@@ -42,7 +57,7 @@ export function handleUpload(req: Request, res: Response): void {
     res.status(400).json({ success: false, error: 'No file uploaded' });
     return;
   }
-  const channelId = req.params.id;
+  const channelId = sanitizeChannelId(req.params.id || 'unknown');
   const relativePath = `/uploads/${channelId}/${file.filename}`;
   logger.info({ event: 'file_uploaded', channelId, filename: file.filename, size: file.size });
   res.json({

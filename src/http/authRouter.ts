@@ -16,6 +16,18 @@ import { authMiddleware } from '../middleware/authMiddleware';
 
 const authRouter = Router();
 
+/** Brute-force protection for login endpoint: max 10 attempts per IP per minute. */
+const loginRateMap = new Map<string, number[]>();
+function isLoginRateLimited(ip: string): boolean {
+  const now = Date.now();
+  const window = 60_000; // 1 minute
+  const max = 10;
+  const timestamps = (loginRateMap.get(ip) ?? []).filter(t => now - t < window);
+  timestamps.push(now);
+  loginRateMap.set(ip, timestamps);
+  return timestamps.length > max;
+}
+
 /**
  * GET /api/webhub/auth/config
  * Returns the current authentication mode so the frontend can decide
@@ -38,6 +50,16 @@ authRouter.get('/config', (_req: Request, res: Response) => {
  * Returns: { token, expiresAt, username } on success, 401 on failure
  */
 authRouter.post('/login', (req: Request, res: Response) => {
+  const ip = req.ip ?? req.socket.remoteAddress ?? 'unknown';
+  if (isLoginRateLimited(ip)) {
+    res.status(429).json({
+      success: false,
+      code: 'RATE_LIMITED',
+      error: 'Too many login attempts. Please try again later.',
+    });
+    return;
+  }
+
   const { username, password } = req.body ?? {};
 
   if (typeof username !== 'string' || typeof password !== 'string') {
