@@ -30,7 +30,8 @@ RUN set -eux; \
     else \
         VERSION="$FRONTEND_VERSION"; \
     fi; \
-    FILENAME="webhub-frontend-${VERSION}.tar.gz"; \
+    SEMVER="${VERSION#v}"; \
+    FILENAME="webhub-frontend-${SEMVER}.tar.gz"; \
     echo "Downloading ${FILENAME} ..."; \
     curl -fL \
         "https://github.com/chatu-ai/webhub-frontend/releases/download/${VERSION}/${FILENAME}" \
